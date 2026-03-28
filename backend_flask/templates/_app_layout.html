@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{% block title %}ConverseAI{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="appBody">
+    {% set ep = request.endpoint %}
+    <div class="appShell">
+      <aside class="sideNav">
+        <a class="sideBrand" href="{{ url_for('dashboard') }}">
+          {% if profile and profile["photo_filename"] %}
+            <div class="logoImg">
+              <img src="{{ url_for('static', filename='uploads/' ~ profile['photo_filename']) }}" alt="" />
+            </div>
+          {% else %}
+            <div class="logoMark logoMarkSm"></div>
+          {% endif %}
+          <div>
+            <div class="brandNameDark">ConverseAI</div>
+          </div>
+        </a>
+
+        <nav class="sideLinks">
+          <a class="sideLink {% if ep == 'dashboard' %}sideLinkActive{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
+          <a class="sideLink {% if ep in ['practice', 'feedback', 'upload_audio'] %}sideLinkActive{% endif %}" href="{{ url_for('practice') }}">Practice</a>
+          <a class="sideLink {% if ep == 'learn' %}sideLinkActive{% endif %}" href="{{ url_for('learn') }}">Learn</a>
+          <a class="sideLink {% if ep == 'history' %}sideLinkActive{% endif %}" href="{{ url_for('history') }}">History</a>
+          <a class="sideLink {% if ep in ['profile', 'language'] %}sideLinkActive{% endif %}" href="{{ url_for('profile') }}">Profile</a>
+        </nav>
+
+        <a class="btnGhost sideLogout" href="{{ url_for('logout') }}">Logout</a>
+      </aside>
+
+      <main class="appMain">
+        <header class="topbar">
+          <div class="topbarLeft">
+            <div class="avatar">
+              {% if profile and profile["photo_filename"] %}
+                <img src="{{ url_for('static', filename='uploads/' ~ profile['photo_filename']) }}" alt="" />
+              {% else %}
+                <div class="avatarFallback">{{ (user["name"]|default("U"))[:1] }}</div>
+              {% endif %}
+            </div>
+            <div>
+              <div class="topbarTitle">{% block header_title %}{% endblock %}</div>
+              <div class="topbarSub">
+                {{ user["name"] }}
+                {% if profile and profile["selected_language"] %}
+                  <span class="dot">•</span>
+                  <span class="chip">{{ profile["selected_language"] }}</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <div class="topbarRight">
+            {% block header_right %}{% endblock %}
+          </div>
+        </header>
+
+        <div class="container">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <div class="flashStack">
+                {% for category, message in messages %}
+                  <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
+
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
+
+    <nav class="bottomNav">
+      <a class="bottomLink {% if ep == 'dashboard' %}bottomLinkActive{% endif %}" href="{{ url_for('dashboard') }}">Home</a>
+      <a class="bottomLink {% if ep in ['practice', 'feedback', 'upload_audio'] %}bottomLinkActive{% endif %}" href="{{ url_for('practice') }}">Record</a>
+      <a class="bottomLink {% if ep == 'learn' %}bottomLinkActive{% endif %}" href="{{ url_for('learn') }}">Videos</a>
+      <a class="bottomLink {% if ep == 'history' %}bottomLinkActive{% endif %}" href="{{ url_for('history') }}">Scores</a>
+      <a class="bottomLink {% if ep in ['profile', 'language'] %}bottomLinkActive{% endif %}" href="{{ url_for('profile') }}">Me</a>
+    </nav>
+  </body>
+</html>

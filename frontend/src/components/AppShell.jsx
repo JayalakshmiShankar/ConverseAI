@@ -16,6 +16,15 @@ function NavItem({ to, icon: IconComponent, label }) {
   );
 }
 
+function BottomNavItem({ to, icon: IconComponent, label }) {
+  return (
+    <NavLink to={to} className={({ isActive }) => `bottomNavItem ${isActive ? "bottomNavItemActive" : ""}`} end>
+      {createElement(IconComponent, { size: 18 })}
+      <span>{label}</span>
+    </NavLink>
+  );
+}
+
 export function AppShell({ children }) {
   const navigate = useNavigate();
 
@@ -53,6 +62,14 @@ export function AppShell({ children }) {
       <main className="main">
         <div className="content">{children}</div>
       </main>
+
+      <nav className="bottomNav">
+        <BottomNavItem to="/dashboard" icon={Gauge} label="Home" />
+        <BottomNavItem to="/languages" icon={Languages} label="Lang" />
+        <BottomNavItem to="/record" icon={Mic} label="Record" />
+        <BottomNavItem to="/feedback" icon={MessageSquareText} label="Tips" />
+        <BottomNavItem to="/chat" icon={Bot} label="AI" />
+      </nav>
     </div>
   );
 }

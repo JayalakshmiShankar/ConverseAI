@@ -1,0 +1,91 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Feedback • ConverseAI{% endblock %}
+{% block header_title %}Feedback{% endblock %}
+{% block header_right %}
+  <a class="btnGhost" href="{{ url_for('practice') }}">Try again</a>
+{% endblock %}
+
+{% block content %}
+  <div class="grid2">
+    <section class="card cardBlue">
+      <div class="cardTitle">Overall Score</div>
+      <div class="scoreRow">
+        <div class="scoreBig">{{ score_10 }}/10</div>
+        <div class="scoreMeta">
+          <div class="muted">{{ "%.0f"|format(session["score"]) }}/100</div>
+          <div class="muted">Points earned: <strong>{{ session["points"] }}</strong></div>
+        </div>
+      </div>
+      <div class="bar">
+        <div class="barFill" style="width: {{ session['score'] }}%"></div>
+      </div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metricLabel">Accuracy</div>
+          <div class="metricValue">{{ feedback["accuracy"] }}%</div>
+        </div>
+        <div class="metric">
+          <div class="metricLabel">Fluency</div>
+          <div class="metricValue">{{ feedback["fluency"] }}%</div>
+        </div>
+      </div>
+      {% if feedback["demo_stt"] %}
+        <div class="flash flash-error">Demo mode: OPENAI_API_KEY not set. Using expected sentence as transcript.</div>
+      {% endif %}
+    </section>
+
+    <section class="card cardGreen">
+      <div class="cardTitle">Transcript</div>
+      <div class="sentenceBox">{{ session["transcript"] }}</div>
+      <div class="muted">Expected:</div>
+      <div class="sentenceBox sentenceBoxSmall">{{ session["sentence"] }}</div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="cardTitle">Word-level Feedback</div>
+    <div class="wordGrid">
+      {% for w in feedback["word_rows"] %}
+        <span class="word {% if w['ok'] %}wordOk{% else %}wordBad{% endif %}">
+          {{ w["expected"] if w["expected"] else "—" }}
+        </span>
+      {% endfor %}
+    </div>
+    <div class="muted">Green = matched word positions. Red = needs improvement.</div>
+  </section>
+
+  <section class="card">
+    <div class="cardTitle">Phoneme Feedback</div>
+    <div class="muted">Missing/weak sounds detected:</div>
+    <div class="chipRow">
+      {% for p in feedback["phoneme_feedback"]["missing"] %}
+        <span class="chip chipGreen">{{ p }}</span>
+      {% endfor %}
+      {% if feedback["phoneme_feedback"]["missing"]|length == 0 %}
+        <span class="muted">No obvious missing phonemes detected.</span>
+      {% endif %}
+    </div>
+
+    {% if feedback["phoneme_feedback"]["tips"]|length %}
+      <div class="tipList">
+        {% for t in feedback["phoneme_feedback"]["tips"] %}
+          <div class="tip">
+            <div class="tipHead">/{{ t["phoneme"] }}/</div>
+            <div class="muted">{{ t["tip"] }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="cardTitle">Next Steps</div>
+    <div class="quickActions">
+      <a class="btnPrimary" href="{{ url_for('practice') }}">Take again</a>
+      <a class="btnGhost" href="{{ url_for('learn') }}">Learn via videos</a>
+      <a class="btnGhost" href="{{ url_for('history') }}">View history</a>
+    </div>
+  </section>
+{% endblock %}
+

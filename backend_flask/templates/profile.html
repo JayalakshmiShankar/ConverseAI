@@ -1,0 +1,62 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Profile • ConverseAI{% endblock %}
+{% block header_title %}Profile{% endblock %}
+
+{% block content %}
+  <div class="grid2">
+    <section class="card">
+      <div class="cardTitle">Your Details</div>
+      <div class="profileRow">
+        <div class="avatar avatarLg">
+          {% if profile and profile["photo_filename"] %}
+            <img src="{{ url_for('static', filename='uploads/' ~ profile['photo_filename']) }}" alt="" />
+          {% else %}
+            <div class="avatarFallback avatarFallbackLg">{{ (user["name"]|default("U"))[:1] }}</div>
+          {% endif %}
+        </div>
+        <div class="profileMeta">
+          <div class="profileName">{{ user["name"] }}</div>
+          <div class="muted">{{ user["email"] }}</div>
+          {% if profile and profile["selected_language"] %}
+            <div class="profileChips">
+              <span class="chip">{{ profile["selected_language"] }}</span>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="cardTitle">Profile Photo (optional)</div>
+      <div class="muted">A clear face photo helps you keep the app personal.</div>
+        <form class="form" method="post" action="{{ url_for('profile_post') }}" enctype="multipart/form-data">
+        <label class="field">
+          <span class="fieldLabel">Upload image</span>
+          <input class="input" type="file" name="photo" accept="image/png,image/jpeg,image/webp" />
+        </label>
+        <button class="btnPrimary" type="submit">
+          <span>Save</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+      {% if profile and profile["photo_filename"] %}
+        <form class="form" method="post" action="{{ url_for('profile_remove_photo') }}">
+          <button class="btnGhost" type="submit">Remove photo</button>
+        </form>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="cardTitle">Quick Actions</div>
+    <div class="quickActions">
+      <a class="btnGhost" href="{{ url_for('language') }}">Select language</a>
+      <a class="btnGhost" href="{{ url_for('practice') }}">Start practice</a>
+      <a class="btnGhost" href="{{ url_for('learn') }}">Learn via videos</a>
+    </div>
+  </section>
+{% endblock %}

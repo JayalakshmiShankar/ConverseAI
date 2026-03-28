@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Login • ConverseAI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="authBody">
+    <main class="authPage authPageSingle">
+      <section class="authPanel authPanelForm">
+        <div class="formHead">
+          <div class="loginBrand">
+            <div class="logoMark logoMarkSm"></div>
+            <div class="brandNameDark">ConverseAI</div>
+          </div>
+          <h2 class="formTitle">Login</h2>
+          <p class="formSub">Enter your email and password to continue.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flashStack">
+              {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        {% if google_enabled %}
+          <div class="oauthBlock">
+            <a class="btnGoogle" href="{{ url_for('auth_google') }}">
+              <span class="googleDot"></span>
+              <span>Continue with Google</span>
+            </a>
+            <div class="oauthDivider">
+              <span>or</span>
+            </div>
+          </div>
+        {% endif %}
+
+        <form class="form" method="post" action="{{ url_for('login_post') }}">
+          <label class="field">
+            <span class="fieldLabel">Email</span>
+            <input class="input" type="email" name="email" placeholder="name@company.com" required />
+          </label>
+
+          <label class="field">
+            <span class="fieldLabel">Password</span>
+            <div class="inputWrap">
+              <input class="input inputWithAction" id="password" type="password" name="password" placeholder="••••••••" required />
+              <button class="fieldAction" type="button" id="togglePw" aria-label="Show password">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke="currentColor" stroke-width="1.8"/>
+                  <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" stroke="currentColor" stroke-width="1.8"/>
+                </svg>
+              </button>
+            </div>
+          </label>
+
+          <div class="metaRow">
+            <a class="link" href="{{ url_for('signup') }}">Create account</a>
+            <span class="metaPill">Session login</span>
+          </div>
+
+          <div class="metaRow">
+            <a class="link" href="{{ url_for('resend_verification') }}">Resend verification email</a>
+            <span class="metaPill">Email verify</span>
+          </div>
+
+          <button class="btnPrimary" type="submit">
+            <span>Continue</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+
+        <div class="formFoot">
+          <span class="muted">New here?</span>
+          <a class="link" href="{{ url_for('signup') }}">Sign up</a>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='auth.js') }}"></script>
+  </body>
+</html>

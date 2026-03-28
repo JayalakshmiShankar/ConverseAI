@@ -1,0 +1,33 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Select Language • ConverseAI{% endblock %}
+{% block header_title %}Select Language{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="cardTitle">Choose a language</div>
+    <div class="muted">Speech recognition and feedback are restricted to the selected language.</div>
+  </section>
+
+  <form method="post" action="{{ url_for('language_post') }}">
+    <div class="langGrid">
+      {% for l in languages %}
+        <label class="langCard {% if selected_language == l['id'] %}langCardActive{% endif %}">
+          <input class="langRadio" type="radio" name="language" value="{{ l['id'] }}" {% if selected_language == l['id'] %}checked{% endif %} />
+          <div class="langCardTitle">{{ l["label"] }}</div>
+          <div class="muted">{{ l["id"] }}</div>
+        </label>
+      {% endfor %}
+    </div>
+    <div class="cardActions">
+      <button class="btnPrimary" type="submit">
+        <span>Continue</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </form>
+{% endblock %}
+

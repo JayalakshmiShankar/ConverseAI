@@ -1,0 +1,65 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Practice • ConverseAI{% endblock %}
+{% block header_title %}Practice{% endblock %}
+{% block header_right %}
+  <a class="btnGhost" href="{{ url_for('practice') }}">New sentence</a>
+{% endblock %}
+
+{% block content %}
+  <div class="grid2">
+    <section class="card cardBlue">
+      <div class="cardTitle">Your Sentence</div>
+      <div class="sentenceBox">
+        {{ sentence["text"] }}
+      </div>
+      <div class="muted">Read it naturally. Keep your pace steady and clear.</div>
+    </section>
+
+    <section class="card cardGreen">
+      <div class="cardTitle">Webcam Guide</div>
+      <div class="muted">Optional: Keep your mouth visible for better articulation awareness.</div>
+      <div class="webcamBox">
+        <video id="cam" autoplay playsinline muted></video>
+        <div class="webcamHint">Align your face in the frame</div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="cardTitle">Record & Upload</div>
+    <div class="muted">Record using your microphone or upload an existing audio file.</div>
+
+    <form id="uploadForm" class="form" method="post" action="{{ url_for('upload_audio') }}" enctype="multipart/form-data">
+      <input type="hidden" name="sentence_id" value="{{ sentence['id'] }}" />
+
+      <div class="recRow">
+        <button class="btnPrimary recBtn" type="button" id="startRec">Start recording</button>
+        <button class="btnGhost recBtn" type="button" id="stopRec" disabled>Stop</button>
+        <div class="recStatus" id="recStatus">Ready</div>
+      </div>
+
+      <div class="audioPreview" id="audioPreview" hidden>
+        <audio id="audioPlayer" controls></audio>
+      </div>
+
+      <label class="field">
+        <span class="fieldLabel">Or upload audio</span>
+        <input class="input" type="file" name="audio" id="audioFile" accept="audio/*" />
+      </label>
+
+      <button class="btnPrimary" type="submit" id="analyzeBtn">
+        <span>Analyze pronunciation</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <div class="muted" id="analyzeHint">Tip: Record 3–7 seconds for best results.</div>
+    </form>
+  </section>
+
+  <script src="{{ url_for('static', filename='practice.js') }}"></script>
+{% endblock %}
+

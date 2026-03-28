@@ -1,0 +1,95 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Home • ConverseAI{% endblock %}
+{% block header_title %}Home{% endblock %}
+{% block header_right %}
+  <a class="btnGhost" href="{{ url_for('language') }}">Change language</a>
+{% endblock %}
+
+{% block content %}
+  <section class="card homeHeaderCard">
+    <div class="homeHeader">
+      <div>
+        <div class="homeTitle">Converse</div>
+        <div class="muted">Select a language and start recording.</div>
+      </div>
+      <div class="homeStats">
+        <div class="homeStat">
+          <div class="homeStatTop">Streak</div>
+          <div class="homeStatNum">🔥 {{ streak_days }}</div>
+        </div>
+        <div class="homeStat">
+          <div class="homeStatTop">Points</div>
+          <div class="homeStatNum">{{ points }}</div>
+        </div>
+        <div class="homeStat">
+          <div class="homeStatTop">Last</div>
+          <div class="homeStatNum">
+            {% if last_score is not none %}{{ "%.0f"|format(last_score) }}{% else %}—{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="searchRow">
+      <div class="searchIcon">⌕</div>
+      <input id="langSearch" class="searchInput" type="text" placeholder="Search language" autocomplete="off" />
+    </div>
+  </section>
+
+  <form id="setLanguageForm" method="post" action="{{ url_for('set_language') }}">
+    <input type="hidden" name="language" id="selectedLanguage" value="" />
+    <div class="homeLangGrid" id="langGrid">
+      {% for l in languages %}
+        <button
+          type="button"
+          class="homeLangCard {% if profile and profile['selected_language'] == l['id'] %}homeLangCardActive{% endif %}"
+          data-label="{{ l['label']|lower }}"
+          data-id="{{ l['id'] }}"
+        >
+          <div class="homeLangLabel">{{ l["label"] }}</div>
+          <div class="muted">{{ l["id"] }}</div>
+        </button>
+      {% endfor %}
+    </div>
+  </form>
+
+  <section class="card">
+    <div class="cardTitle">Improvement to be done</div>
+    <div class="improveGrid">
+      <a class="btnGhost" href="{{ url_for('history') }}">Phonemes</a>
+      <a class="btnGhost" href="{{ url_for('practice') }}">Sentences</a>
+      <a class="btnGhost" href="{{ url_for('history') }}">Scores</a>
+      <a class="btnGhost" href="{{ url_for('learn') }}">Learn through video</a>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      var search = document.getElementById("langSearch");
+      var grid = document.getElementById("langGrid");
+      var hidden = document.getElementById("selectedLanguage");
+      var form = document.getElementById("setLanguageForm");
+
+      function filter() {
+        var q = (search.value || "").trim().toLowerCase();
+        var cards = grid.querySelectorAll("[data-label]");
+        cards.forEach(function (c) {
+          var label = c.getAttribute("data-label") || "";
+          var id = (c.getAttribute("data-id") || "").toLowerCase();
+          var show = !q || label.indexOf(q) !== -1 || id.indexOf(q) !== -1;
+          c.style.display = show ? "" : "none";
+        });
+      }
+
+      grid.addEventListener("click", function (e) {
+        var btn = e.target.closest("button[data-id]");
+        if (!btn) return;
+        hidden.value = btn.getAttribute("data-id") || "";
+        form.submit();
+      });
+
+      if (search) search.addEventListener("input", filter);
+    })();
+  </script>
+{% endblock %}

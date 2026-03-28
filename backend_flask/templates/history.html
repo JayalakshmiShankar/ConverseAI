@@ -1,0 +1,33 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}History • ConverseAI{% endblock %}
+{% block header_title %}Score History{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="cardTitle">Recent sessions</div>
+    <div class="muted">Open a session to view detailed phoneme and word feedback.</div>
+  </section>
+
+  <section class="card">
+    <div class="historyList">
+      {% for s in sessions %}
+        <a class="historyRow" href="{{ url_for('feedback', session_id=s['id']) }}">
+          <div class="historyLeft">
+            <div class="historyScore">{{ "%.0f"|format(s["score"]) }}</div>
+            <div class="muted">/100</div>
+          </div>
+          <div class="historyMid">
+            <div class="historyTitle">{{ s["language"] }}</div>
+            <div class="muted">{{ s["created_at"] }}</div>
+          </div>
+          <div class="historyArrow">›</div>
+        </a>
+      {% endfor %}
+      {% if sessions|length == 0 %}
+        <div class="muted">No sessions yet. Start a practice to see your history.</div>
+      {% endif %}
+    </div>
+  </section>
+{% endblock %}
+

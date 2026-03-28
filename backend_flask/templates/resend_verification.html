@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Verify Email • ConverseAI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body class="authBody">
+    <main class="authPage authPageSingle">
+      <section class="authPanel authPanelForm">
+        <div class="formHead">
+          <div class="loginBrand">
+            <div class="logoMark logoMarkSm"></div>
+            <div class="brandNameDark">ConverseAI</div>
+          </div>
+          <h2 class="formTitle">Email verification</h2>
+          <p class="formSub">Enter your email to receive a verification link.</p>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flashStack">
+              {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form class="form" method="post" action="{{ url_for('resend_verification_post') }}">
+          <label class="field">
+            <span class="fieldLabel">Email</span>
+            <input class="input" type="email" name="email" placeholder="name@company.com" value="{{ email }}" required />
+          </label>
+
+          <button class="btnPrimary" type="submit">
+            <span>Send verification link</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </form>
+
+        <div class="formFoot">
+          <a class="link" href="{{ url_for('login') }}">Back to login</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

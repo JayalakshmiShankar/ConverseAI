@@ -1,0 +1,30 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Learn • ConverseAI{% endblock %}
+{% block header_title %}Learn Through Videos{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="cardTitle">Recommended videos</div>
+    <div class="muted">Short lessons to help you fix specific mouth shapes and sounds.</div>
+  </section>
+
+  <div class="videoGrid">
+    {% for v in videos %}
+      <section class="card videoCard">
+        <div class="videoTitle">{{ v["title"] }}</div>
+        <div class="muted">{{ language_id }}</div>
+        <div class="cardActions">
+          <a class="btnPrimary" href="{{ v['url'] }}" target="_blank" rel="noreferrer">Watch</a>
+          <a class="btnGhost" href="{{ url_for('practice') }}">Practice</a>
+        </div>
+      </section>
+    {% endfor %}
+    {% if videos|length == 0 %}
+      <section class="card">
+        <div class="muted">No videos configured for this language yet.</div>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}
+
