@@ -1,0 +1,43 @@
+{% if user %}
+  {% extends "_app_layout.html" %}
+  {% block title %}Error • ConverseAI{% endblock %}
+  {% block header_title %}Error{% endblock %}
+  {% block content %}
+    <section class="card">
+      <div class="cardTitle">Something went wrong</div>
+      <div class="muted">{{ message }}</div>
+      <div class="quickActions">
+        <a class="btnPrimary" href="{{ url_for('dashboard') }}">Go to Home</a>
+        <a class="btnGhost" href="{{ url_for('practice') }}">Try Practice</a>
+      </div>
+    </section>
+  {% endblock %}
+{% else %}
+  <!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width,initial-scale=1" />
+      <title>Error • ConverseAI</title>
+      <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+    </head>
+    <body class="authBody">
+      <main class="authPage authPageSingle">
+        <section class="authPanel authPanelForm">
+          <div class="formHead">
+            <div class="loginBrand">
+              <div class="logoMark logoMarkSm"></div>
+              <div class="brandNameDark">ConverseAI</div>
+            </div>
+            <h2 class="formTitle">Something went wrong</h2>
+            <p class="formSub">{{ message }}</p>
+          </div>
+          <div class="formFoot">
+            <a class="link" href="{{ url_for('login') }}">Back to login</a>
+          </div>
+        </section>
+      </main>
+    </body>
+  </html>
+{% endif %}
+

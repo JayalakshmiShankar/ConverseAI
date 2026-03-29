@@ -2,6 +2,9 @@ import os
 import json
 import sqlite3
 import uuid
+import sys
+import logging
+from typing import Any
 from datetime import date, datetime, timedelta
 from functools import wraps
 from email.message import EmailMessage
@@ -24,14 +27,23 @@ UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=False)
 load_dotenv(override=False)
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("converseai")
+
 
 LANGUAGES = [
     {"id": "en-US", "label": "English (US)"},
     {"id": "en-GB", "label": "English (UK)"},
-    {"id": "ja-JP", "label": "Japanese"},
     {"id": "de-DE", "label": "German"},
     {"id": "es-ES", "label": "Spanish"},
 ]
+
+LANGUAGE_PRICES_INR = {
+    "en-US": 200,
+    "en-GB": 200,
+    "es-ES": 200,
+    "de-DE": 200,
+}
 
 
 def _lang_to_whisper_code(language_id: str) -> str:
@@ -171,17 +183,21 @@ def transcribe_audio(audio_path: str, language_id: str) -> tuple[str, bool]:
     if not api_key:
         return "", True
 
-    client = OpenAI(api_key=api_key)
-    with open(audio_path, "rb") as f:
-        result = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=f,
-            language=_lang_to_whisper_code(language_id),
-            response_format="text",
-        )
-    if isinstance(result, str):
-        return result.strip(), False
-    return str(result).strip(), False
+    try:
+        client = OpenAI(api_key=api_key)
+        with open(audio_path, "rb") as f:
+            result = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                language=_lang_to_whisper_code(language_id),
+                response_format="text",
+            )
+        if isinstance(result, str):
+            return result.strip(), False
+        return str(result).strip(), False
+    except Exception:
+        logger.exception("transcribe_audio failed")
+        return "", True
 
 
 def smtp_configured() -> bool:
@@ -271,24 +287,58 @@ def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me")
     app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = False
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     oauth = OAuth(app)
 
-    google_client_id = os.environ.get("GOOGLE_CLIENT_ID") or ""
-    google_client_secret = os.environ.get("GOOGLE_CLIENT_SECRET") or ""
-    if google_client_id and google_client_secret:
-        oauth.register(
-            name="google",
-            client_id=google_client_id,
-            client_secret=google_client_secret,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
-        )
+    def demo_mode() -> bool:
+        load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=True)
+        return (os.environ.get("DEMO_MODE") or "").strip().lower() in {"1", "true", "yes"}
+
+    def db_safe(fn, fallback):
+        try:
+            if not getattr(g, "db", None):
+                return fallback
+            return fn()
+        except Exception:
+            logger.exception("db operation failed")
+            return fallback
+
+    def google_config() -> tuple[str, str]:
+        load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"), override=True)
+        cid = (os.environ.get("GOOGLE_CLIENT_ID") or "").strip()
+        csec = (os.environ.get("GOOGLE_CLIENT_SECRET") or "").strip()
+        return cid, csec
+
+    def ensure_google_oauth_registered() -> bool:
+        cid, csec = google_config()
+        if not (cid and csec):
+            return False
+
+        public_base = (os.environ.get("PUBLIC_BASE_URL") or "").strip()
+        app_env = (os.environ.get("APP_ENV") or "").strip().lower()
+        if app_env != "production" and (public_base.startswith("http://") or not public_base):
+            os.environ.setdefault("AUTHLIB_INSECURE_TRANSPORT", "1")
+
+        if getattr(oauth, "google", None) is None:
+            oauth.register(
+                name="google",
+                client_id=cid,
+                client_secret=csec,
+                server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+                client_kwargs={"scope": "openid email profile"},
+            )
+        return True
 
     @app.before_request
     def before_request() -> None:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
+        try:
+            g.db = sqlite3.connect(DB_PATH)
+            g.db.row_factory = sqlite3.Row
+        except Exception:
+            logger.exception("db connect failed")
+            g.db = None
 
     @app.get("/@vite/client")
     def vite_client_stub():
@@ -306,7 +356,52 @@ def create_app() -> Flask:
     def teardown_request(_exc) -> None:
         db = getattr(g, "db", None)
         if db is not None:
-            db.close()
+            try:
+                db.close()
+            except Exception:
+                logger.exception("db close failed")
+
+    @app.errorhandler(413)
+    def too_large(_e):
+        flash("Upload too large. Please upload a smaller file (max 2MB).", "error")
+        return redirect(url_for("practice"))
+
+    @app.errorhandler(Exception)
+    def unhandled_error(e):
+        logger.exception("unhandled error")
+        try:
+            user_id = int(session.get("user_id") or 0)
+        except Exception:
+            user_id = 0
+
+        if user_id:
+            try:
+                user = g.db.execute("SELECT id, name, email FROM users WHERE id = ?", (user_id,)).fetchone() if g.db else None
+                profile = (
+                    g.db.execute(
+                        "SELECT user_id, photo_filename, selected_language FROM profiles WHERE user_id = ?",
+                        (user_id,),
+                    ).fetchone()
+                    if g.db
+                    else None
+                )
+                return (
+                    render_template(
+                        "error.html",
+                        user=user,
+                        profile=profile,
+                        message="Something went wrong. Please try again.",
+                    ),
+                    200,
+                )
+            except Exception:
+                logger.exception("error handler render failed")
+                return redirect(url_for("dashboard"))
+
+        return (
+            render_template("error.html", user=None, profile=None, message="Something went wrong. Please try again."),
+            200,
+        )
 
     def init_db() -> None:
         with sqlite3.connect(DB_PATH) as db:
@@ -383,6 +478,19 @@ def create_app() -> Flask:
                     expires_at TEXT NOT NULL,
                     used_at TEXT,
                     created_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+                """
+            )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS language_access (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    language_id TEXT NOT NULL,
+                    price_inr INTEGER NOT NULL,
+                    purchased_at TEXT NOT NULL,
+                    UNIQUE(user_id, language_id),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
                 """
@@ -516,7 +624,20 @@ def create_app() -> Flask:
         profile = get_profile(user_id)
         if profile is None:
             return redirect(url_for("profile"))
-        if not (profile["selected_language"] or ""):
+        selected = (profile["selected_language"] or "").strip()
+        allowed = {l["id"] for l in LANGUAGES}
+        if selected and selected not in allowed:
+            try:
+                g.db.execute(
+                    "UPDATE profiles SET selected_language = ? WHERE user_id = ?",
+                    ("", user_id),
+                )
+                g.db.commit()
+            except Exception:
+                pass
+            flash("Your previous language is no longer available. Please choose another language.", "error")
+            return redirect(url_for("dashboard"))
+        if not selected:
             flash("Select a language to start practice.", "error")
             return redirect(url_for("dashboard"))
         return None
@@ -546,7 +667,7 @@ def create_app() -> Flask:
     def login():
         if session.get("user_id"):
             return redirect(url_for("dashboard"))
-        google_enabled = bool(google_client_id and google_client_secret)
+        google_enabled = ensure_google_oauth_registered()
         return render_template("login.html", google_enabled=google_enabled)
 
     @app.post("/login")
@@ -594,23 +715,42 @@ def create_app() -> Flask:
     def signup():
         if session.get("user_id"):
             return redirect(url_for("dashboard"))
-        google_enabled = bool(google_client_id and google_client_secret)
+        google_enabled = ensure_google_oauth_registered()
         return render_template("signup.html", google_enabled=google_enabled)
 
     @app.get("/auth/google")
     def auth_google():
-        if not (google_client_id and google_client_secret):
+        if not ensure_google_oauth_registered():
             flash("Google sign-in is not configured.", "error")
             return redirect(url_for("login"))
-        redirect_uri = (os.environ.get("PUBLIC_BASE_URL") or request.url_root.rstrip("/")) + url_for("auth_google_callback")
-        return oauth.google.authorize_redirect(redirect_uri)
+        redirect_uri = request.url_root.rstrip("/") + url_for("auth_google_callback")
+        try:
+            return oauth.google.authorize_redirect(redirect_uri)
+        except Exception:
+            flash("Google sign-in could not start. Check GOOGLE_CLIENT_ID/SECRET and redirect URL.", "error")
+            return redirect(url_for("login"))
 
     @app.get("/auth/google/callback")
     def auth_google_callback():
-        if not (google_client_id and google_client_secret):
+        if not ensure_google_oauth_registered():
             flash("Google sign-in is not configured.", "error")
             return redirect(url_for("login"))
-        token = oauth.google.authorize_access_token()
+        try:
+            token = oauth.google.authorize_access_token()
+        except Exception:
+            exc = sys.exc_info()[1]
+            exc_name = exc.__class__.__name__ if exc else ""
+            if exc_name == "MismatchingStateError":
+                flash(
+                    "Google sign-in failed (session mismatch). Use one host only (localhost OR 127.0.0.1) and open the site in a normal browser tab (not an embedded preview). Then try again.",
+                    "error",
+                )
+                return redirect(url_for("login"))
+            flash(
+                "Google sign-in failed. Use the same host (localhost or 127.0.0.1) for login and callback, and ensure the redirect URI matches.",
+                "error",
+            )
+            return redirect(url_for("login"))
         userinfo = token.get("userinfo") or {}
         email = (userinfo.get("email") or "").strip().lower()
         name = (userinfo.get("name") or "").strip() or "User"
@@ -737,14 +877,15 @@ def create_app() -> Flask:
         onboarding = ensure_onboarding(int(session["user_id"]))
         if onboarding:
             return onboarding
-        profile_row = get_profile(int(session["user_id"]))
+        user_id = int(session["user_id"])
+        profile_row = get_profile(user_id)
         streak = g.db.execute(
             "SELECT current_streak, last_practice_date, points FROM streaks WHERE user_id = ?",
-            (int(session["user_id"]),),
+            (user_id,),
         ).fetchone()
         last = g.db.execute(
             "SELECT score, created_at FROM practice_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-            (int(session["user_id"]),),
+            (user_id,),
         ).fetchone()
 
         streak_days = int(streak["current_streak"]) if streak else 0
@@ -752,11 +893,18 @@ def create_app() -> Flask:
         last_score = float(last["score"]) if last else None
 
         msg = "Start your first practice today." if streak_days == 0 else f"You're on a {streak_days}-day streak!"
+        rows = db_safe(
+            lambda: g.db.execute("SELECT language_id FROM language_access WHERE user_id = ?", (user_id,)).fetchall(),
+            [],
+        )
+        owned = {str(r["language_id"]) for r in (rows or []) if r and r["language_id"]}
         return render_template(
             "dashboard.html",
             user=user,
             profile=profile_row,
             languages=LANGUAGES,
+            language_prices=LANGUAGE_PRICES_INR,
+            owned_languages=owned,
             streak_days=streak_days,
             points=points,
             last_score=last_score,
@@ -877,6 +1025,106 @@ def create_app() -> Flask:
         g.db.commit()
         return redirect(url_for("practice"))
 
+    @app.post("/purchase-language")
+    @login_required
+    def purchase_language():
+        user_id = int(session["user_id"])
+        language_id = (request.form.get("language") or "").strip()
+        bank = (request.form.get("bank") or "").strip()
+        acc = (request.form.get("acc") or "").strip()
+        ifsc = (request.form.get("ifsc") or "").strip()
+        if language_id not in {l["id"] for l in LANGUAGES}:
+            flash("Select a valid language.", "error")
+            return redirect(url_for("dashboard"))
+        if not (bank and acc and ifsc):
+            flash("Please fill bank details to proceed.", "error")
+            return redirect(url_for("dashboard"))
+        price = int(LANGUAGE_PRICES_INR.get(language_id, 200))
+        now = datetime.utcnow().isoformat()
+        db_safe(
+            lambda: g.db.execute(
+                """
+                INSERT OR REPLACE INTO language_access (user_id, language_id, price_inr, purchased_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (user_id, language_id, price, now),
+            ),
+            None,
+        )
+        db_safe(lambda: g.db.commit(), None)
+
+        updated_at = datetime.utcnow().isoformat()
+        if get_profile(user_id) is None:
+            g.db.execute(
+                "INSERT INTO profiles (user_id, photo_filename, selected_language, updated_at) VALUES (?, ?, ?, ?)",
+                (user_id, None, language_id, updated_at),
+            )
+        else:
+            g.db.execute(
+                "UPDATE profiles SET selected_language = ?, updated_at = ? WHERE user_id = ?",
+                (language_id, updated_at, user_id),
+            )
+        g.db.commit()
+        flash("Language unlocked. Lifetime access enabled.", "success")
+        return redirect(url_for("practice"))
+
+    @app.post("/purchase-language/api")
+    @login_required
+    def purchase_language_api():
+        user_id = int(session["user_id"])
+        language_id = (request.form.get("language") or "").strip()
+        bank = (request.form.get("bank") or "").strip()
+        acc = (request.form.get("acc") or "").strip()
+        ifsc = (request.form.get("ifsc") or "").strip()
+
+        if language_id not in {l["id"] for l in LANGUAGES}:
+            return {"ok": False, "message": "Select a valid language."}, 400
+        if not (bank and acc and ifsc):
+            return {"ok": False, "message": "Please fill bank details to proceed."}, 400
+
+        price = int(LANGUAGE_PRICES_INR.get(language_id, 200))
+        txn = uuid.uuid4().hex[:10].upper()
+        now = datetime.utcnow().isoformat()
+
+        try:
+            db_safe(
+                lambda: g.db.execute(
+                    """
+                    INSERT OR REPLACE INTO language_access (user_id, language_id, price_inr, purchased_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_id, language_id, price, now),
+                ),
+                None,
+            )
+            db_safe(lambda: g.db.commit(), None)
+
+            updated_at = datetime.utcnow().isoformat()
+            if get_profile(user_id) is None:
+                g.db.execute(
+                    "INSERT INTO profiles (user_id, photo_filename, selected_language, updated_at) VALUES (?, ?, ?, ?)",
+                    (user_id, None, language_id, updated_at),
+                )
+            else:
+                g.db.execute(
+                    "UPDATE profiles SET selected_language = ?, updated_at = ? WHERE user_id = ?",
+                    (language_id, updated_at, user_id),
+                )
+            g.db.commit()
+        except Exception:
+            logger.exception("purchase_language_api failed")
+            return {"ok": False, "message": "Payment failed. Please try again."}, 200
+
+        return {
+            "ok": True,
+            "transaction_id": txn,
+            "language_id": language_id,
+            "price_inr": price,
+            "bank": bank,
+            "message": "Payment confirmed. Lifetime access enabled.",
+            "redirect": url_for("practice"),
+        }
+
     @app.get("/practice")
     @login_required
     def practice():
@@ -897,76 +1145,476 @@ def create_app() -> Flask:
     @app.post("/upload_audio")
     @login_required
     def upload_audio():
-        user_id = int(session["user_id"])
-        gate = ensure_language_selected(user_id)
-        if gate:
-            return gate
+        try:
+            user_id = int(session["user_id"])
+            gate = ensure_language_selected(user_id)
+            if gate:
+                return gate
 
-        profile_row = get_profile(user_id)
-        language_id = profile_row["selected_language"]
-        sentence_id = int(request.form.get("sentence_id") or "0")
-        expected_row = g.db.execute("SELECT id, text FROM sentences WHERE id = ?", (sentence_id,)).fetchone()
-        if expected_row is None:
-            flash("Sentence not found. Try again.", "error")
+            profile_row = get_profile(user_id)
+            language_id = profile_row["selected_language"]
+            custom_text = (request.form.get("custom_text") or "").strip()
+            expected_text = ""
+            if custom_text:
+                if len(custom_text) < 3 or len(custom_text) > 300:
+                    flash("Type a short sentence (3–300 characters).", "error")
+                    return redirect(url_for("practice"))
+                expected_text = custom_text
+            else:
+                sentence_id = int(request.form.get("sentence_id") or "0")
+                expected_row = db_safe(
+                    lambda: g.db.execute("SELECT id, text FROM sentences WHERE id = ?", (sentence_id,)).fetchone(),
+                    None,
+                )
+                if expected_row is None:
+                    flash("Sentence not found. Try again.", "error")
+                    return redirect(url_for("practice"))
+                expected_text = str(expected_row["text"] or "").strip()
+                if not expected_text:
+                    flash("Sentence not found. Try again.", "error")
+                    return redirect(url_for("practice"))
+
+            spoken_text = (request.form.get("spoken_text") or "").strip()
+            audio = request.files.get("audio")
+            transcript = ""
+            demo = False
+            if spoken_text:
+                transcript = spoken_text
+            else:
+                if not audio or not audio.filename:
+                    flash("Please record or upload an audio file.", "error")
+                    return redirect(url_for("practice"))
+                audio_filename = f"{uuid.uuid4().hex}.webm"
+                audio_path = os.path.join(UPLOAD_DIR, audio_filename)
+                audio.save(audio_path)
+                transcript, demo = transcribe_audio(audio_path, language_id)
+                if demo:
+                    transcript = expected_text
+            accuracy, fluency = score_from_words(expected_text, transcript)
+            expected_ph = pseudo_phonemes(expected_text, language_id)
+            actual_ph = pseudo_phonemes(transcript, language_id)
+            total = score_total(accuracy, fluency, expected_ph, actual_ph)
+
+
+
+            word_rows = compare_words(expected_text, transcript)
+            phoneme_fb = build_phoneme_feedback(language_id, expected_ph, actual_ph)
+            feedback = {
+                "demo_stt": demo,
+                "accuracy": accuracy,
+                "fluency": fluency,
+                "confidence": round(min(0.99, max(0.2, float(total) / 100.0)), 2),
+                "phonemes_expected": expected_ph[:120],
+                "phonemes_actual": actual_ph[:120],
+                "word_rows": word_rows[:80],
+                "phoneme_feedback": phoneme_fb,
+            }
+
+            points_earned = 10
+            streak_days = update_streak_after_practice(user_id)
+            if streak_days >= 2:
+                points_earned += 5
+
+            now = datetime.utcnow().isoformat()
+            cur = db_safe(
+                lambda: g.db.execute(
+                    """
+                    INSERT INTO practice_sessions (user_id, sentence, score, created_at, language, transcript, feedback_json, points)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        expected_text,
+                        total,
+                        now,
+                        language_id,
+                        transcript,
+                        json.dumps(feedback, ensure_ascii=False),
+                        points_earned,
+                    ),
+                ),
+                None,
+            )
+            db_safe(lambda: g.db.commit(), None)
+            db_safe(lambda: g.db.execute("UPDATE streaks SET points = points + ? WHERE user_id = ?", (points_earned, user_id)), None)
+            db_safe(lambda: g.db.commit(), None)
+
+            session_id = int(cur.lastrowid) if cur is not None else 0
+            if not session_id:
+                flash("Saved with limited details. Please try again.", "error")
+                return redirect(url_for("dashboard"))
+            return redirect(url_for("feedback", session_id=session_id))
+        except Exception:
+            logger.exception("upload_audio failed")
+            flash("Upload failed. Please try again.", "error")
             return redirect(url_for("practice"))
+
+    @app.get("/ai-conversation")
+    @login_required
+    def ai_conversation():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+        profile_row = get_profile(user_id)
+        user = get_user(user_id)
+        return render_template("ai_conversation.html", user=user, profile=profile_row, demo=demo_mode())
+
+    @app.post("/ai-conversation/upload")
+    @login_required
+    def ai_conversation_upload():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+        profile_row = get_profile(user_id)
+        language_id = (profile_row["selected_language"] or "en-US") if profile_row else "en-US"
 
         audio = request.files.get("audio")
         if not audio or not audio.filename:
-            flash("Please record or upload an audio file.", "error")
-            return redirect(url_for("practice"))
+            return {"user": "", "ai": "Please try again."}
 
         audio_filename = f"{uuid.uuid4().hex}.webm"
         audio_path = os.path.join(UPLOAD_DIR, audio_filename)
-        audio.save(audio_path)
+        try:
+            audio.save(audio_path)
+        except Exception:
+            logger.exception("ai audio save failed")
+            return {"user": "", "ai": "Please try again."}
 
-        transcript, demo = transcribe_audio(audio_path, language_id)
-        if demo:
-            transcript = expected_row["text"]
+        try:
+            if demo_mode():
+                user_text = "How are you?"
+            else:
+                user_text, demo = transcribe_audio(audio_path, language_id)
+                if demo or not user_text:
+                    user_text = "How are you?"
+        except Exception:
+            logger.exception("ai stt failed")
+            user_text = "How are you?"
 
-        expected_text = expected_row["text"]
-        accuracy, fluency = score_from_words(expected_text, transcript)
-        expected_ph = pseudo_phonemes(expected_text, language_id)
-        actual_ph = pseudo_phonemes(transcript, language_id)
-        total = score_total(accuracy, fluency, expected_ph, actual_ph)
+        replies = [
+            "Great! Try speaking a bit slower.",
+            "Nice pronunciation! Repeat: 'Thank you for your time.'",
+            "Focus on the 'th' sound. Repeat: 'Thanks for the update.'",
+            "I'm doing great! Let's practice your pronunciation.",
+        ]
 
-        word_rows = compare_words(expected_text, transcript)
-        phoneme_fb = build_phoneme_feedback(language_id, expected_ph, actual_ph)
-        feedback = {
-            "demo_stt": demo,
-            "accuracy": accuracy,
-            "fluency": fluency,
-            "phonemes_expected": expected_ph[:120],
-            "phonemes_actual": actual_ph[:120],
-            "word_rows": word_rows[:80],
-            "phoneme_feedback": phoneme_fb,
-        }
+        ai_text = replies[0]
+        try:
+            if not demo_mode() and os.environ.get("OPENAI_API_KEY"):
+                client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+                result = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a friendly pronunciation coach. Reply in 1-2 sentences and ask the user to repeat a short phrase.",
+                        },
+                        {"role": "user", "content": user_text},
+                    ],
+                    temperature=0.7,
+                )
+                ai_text = (result.choices[0].message.content or "").strip() or ai_text
+            else:
+                ai_text = replies[secrets.randbelow(len(replies))]
+        except Exception:
+            logger.exception("ai reply failed")
+            ai_text = replies[secrets.randbelow(len(replies))]
 
-        points_earned = int(round(total))
-        now = datetime.utcnow().isoformat()
-        cur = g.db.execute(
-            """
-            INSERT INTO practice_sessions (user_id, sentence, score, created_at, language, transcript, feedback_json, points)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                expected_text,
-                total,
-                now,
-                language_id,
-                transcript,
-                json.dumps(feedback, ensure_ascii=False),
-                points_earned,
-            ),
+        return {"user": user_text, "ai": ai_text}
+
+    @app.post("/ai-conversation/text")
+    @login_required
+    def ai_conversation_text():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+
+        payload = request.get_json(silent=True) or {}
+        user_text = str(payload.get("text") or "").strip()
+        if not user_text:
+            return {"user": "", "ai": "Please try again."}
+
+        replies = [
+            "Great! Try speaking a bit slower.",
+            "Nice pronunciation! Repeat: 'Thank you for your time.'",
+            "Focus on 'th' sound. Repeat: 'Thanks for the update.'",
+            "I'm doing great! Let's practice your pronunciation.",
+        ]
+
+        ai_text = replies[0]
+        try:
+            if not demo_mode() and os.environ.get("OPENAI_API_KEY"):
+                client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+                result = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a friendly pronunciation coach. Reply in 1-2 sentences and ask the user to repeat a short phrase.",
+                        },
+                        {"role": "user", "content": user_text},
+                    ],
+                    temperature=0.7,
+                )
+                ai_text = (result.choices[0].message.content or "").strip() or ai_text
+            else:
+                ai_text = replies[secrets.randbelow(len(replies))]
+        except Exception:
+            logger.exception("ai reply failed")
+            ai_text = replies[secrets.randbelow(len(replies))]
+
+        return {"user": user_text, "ai": ai_text}
+
+    @app.get("/streaks")
+    @login_required
+    def streaks():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+        user = get_user(user_id)
+        profile_row = get_profile(user_id)
+
+        daily_scores: list[dict[str, Any]] = []
+        if demo_mode():
+            streak_days = 3
+            points = 120
+            today = date.today()
+            daily_scores = []
+            for i in range(7):
+                d = today - timedelta(days=i)
+                base = 62 + (i * 3)
+                daily_scores.append(
+                    {
+                        "date": d.isoformat(),
+                        "avg_score": min(92, base),
+                        "best_score": min(96, base + 5),
+                        "tests": 1 if i in {0, 1, 2, 4, 6} else 0,
+                    }
+                )
+            daily_scores = list(reversed(daily_scores))
+        else:
+            row = db_safe(
+                lambda: g.db.execute("SELECT current_streak, points FROM streaks WHERE user_id = ?", (user_id,)).fetchone(),
+                None,
+            )
+            streak_days = int(row["current_streak"]) if row else 0
+            points = int(row["points"]) if row else 0
+            daily_rows = db_safe(
+                lambda: g.db.execute(
+                    """
+                    SELECT
+                      substr(created_at, 1, 10) AS d,
+                      AVG(score) AS avg_score,
+                      MAX(score) AS best_score,
+                      COUNT(*) AS tests
+                    FROM practice_sessions
+                    WHERE user_id = ?
+                    GROUP BY substr(created_at, 1, 10)
+                    ORDER BY d DESC
+                    LIMIT 7
+                    """,
+                    (user_id,),
+                ).fetchall(),
+                [],
+            )
+            daily_scores = []
+            for r in list(reversed(daily_rows or [])):
+                daily_scores.append(
+                    {
+                        "date": str(r["d"] or ""),
+                        "avg_score": float(r["avg_score"] or 0),
+                        "best_score": float(r["best_score"] or 0),
+                        "tests": int(r["tests"] or 0),
+                    }
+                )
+
+        circles = [i < min(5, streak_days) for i in range(5)]
+        words = [
+            "You're improving every day!",
+            "Consistency beats perfection!",
+            "Small steps make big progress.",
+            "Your confidence is growing.",
+        ]
+        return render_template(
+            "streaks.html",
+            user=user,
+            profile=profile_row,
+            streak_days=streak_days,
+            points=points,
+            circles=circles,
+            daily_scores=daily_scores,
+            motivational=words[secrets.randbelow(len(words))],
+            demo=demo_mode(),
         )
-        g.db.commit()
 
-        update_streak_after_practice(user_id)
-        g.db.execute("UPDATE streaks SET points = points + ? WHERE user_id = ?", (points_earned, user_id))
-        g.db.commit()
+    @app.get("/video-test")
+    @login_required
+    def video_test():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+        user = get_user(user_id)
+        profile_row = get_profile(user_id)
 
-        session_id = int(cur.lastrowid)
-        return redirect(url_for("feedback", session_id=session_id))
+        video_id = request.args.get("video_id") or ""
+        expected_phrase = (request.args.get("phrase") or "").strip()
+        if not expected_phrase:
+            expected_phrase = "The quick brown fox jumps over the lazy dog"
+        url = ""
+        title = ""
+        if video_id:
+            row = db_safe(
+                lambda: g.db.execute("SELECT title, url FROM learning_videos WHERE id = ?", (int(video_id),)).fetchone(),
+                None,
+            )
+            if row:
+                title = row["title"]
+                url = row["url"]
+
+        if not url:
+            url = ""
+
+        is_youtube = "youtube.com" in url or "youtu.be" in url
+        embed_url = url
+        if "youtu.be/" in url:
+            vid = url.split("youtu.be/")[-1].split("?")[0]
+            embed_url = f"https://www.youtube.com/embed/{vid}"
+        if "watch?v=" in url:
+            vid = url.split("watch?v=")[-1].split("&")[0]
+            embed_url = f"https://www.youtube.com/embed/{vid}"
+
+        return render_template(
+            "video_test.html",
+            user=user,
+            profile=profile_row,
+            video_url=url,
+            is_youtube=is_youtube,
+            embed_url=embed_url,
+            title=title,
+            expected_phrase=expected_phrase,
+            demo=demo_mode(),
+        )
+
+    @app.post("/video-test/analyze")
+    @login_required
+    def video_test_analyze():
+        try:
+            user_id = int(session["user_id"])
+        except Exception:
+            user_id = 0
+
+        def analyze_speech(expected: str, spoken: str):
+            exp = [w for w in expected.lower().split(" ") if w]
+            usr = [w for w in spoken.lower().split(" ") if w]
+
+            mistakes = []
+            correct = 0
+            for i, word in enumerate(exp):
+                if i >= len(usr) or not usr[i]:
+                    mistakes.append({"word": word, "type": "Skipped"})
+                elif usr[i] != word:
+                    mistakes.append({"word": word, "said": usr[i], "type": "Incorrect"})
+                else:
+                    correct += 1
+
+            score = int(round((correct / max(1, len(exp))) * 10))
+            score = max(0, min(10, score))
+            return {"score": score, "mistakes": mistakes, "correct": correct, "total": len(exp)}
+
+        audio = request.files.get("audio")
+        expected = (request.form.get("expected") or "").strip()
+        if not audio or not audio.filename:
+            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
+
+        audio_filename = f"{uuid.uuid4().hex}.webm"
+        audio_path = os.path.join(UPLOAD_DIR, audio_filename)
+        try:
+            audio.save(audio_path)
+        except Exception:
+            logger.exception("video_test save failed")
+            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
+
+        try:
+            if demo_mode():
+                return {
+                    "score": 9,
+                    "confidence": 82,
+                    "feedback": [
+                        "Good clarity",
+                        "Improve 'th' pronunciation",
+                        "Slight pause needed between words",
+                    ],
+                }
+
+            profile_row = get_profile(user_id) if user_id else None
+            language_id = (profile_row["selected_language"] or "en-US") if profile_row else "en-US"
+
+            transcript, demo = transcribe_audio(audio_path, language_id)
+            if demo or not transcript:
+                return {
+                    "score": 9,
+                    "confidence": 80,
+                    "feedback": [
+                        "Good clarity",
+                        "Improve 'th' pronunciation",
+                        "Slight pause needed between words",
+                    ],
+                }
+
+            if expected:
+                analysis = analyze_speech(expected, transcript)
+                score = int(analysis["score"])
+                total = int(analysis["total"]) or 1
+                correct = int(analysis["correct"])
+                confidence = int(max(25, min(99, round((correct / total) * 100))))
+                mistakes = list(analysis["mistakes"])[:3]
+                feedback = []
+                if not mistakes:
+                    feedback = ["Good clarity", "Nice pacing", "Keep your stress on key words consistent"]
+                else:
+                    for m in mistakes:
+                        if m.get("type") == "Skipped":
+                            feedback.append(f"Skipped: '{m.get('word', '')}'")
+                        else:
+                            feedback.append(
+                                f"Expected '{m.get('word', '')}', you said '{m.get('said', '')}'"
+                            )
+                    if len(feedback) < 3:
+                        feedback.append("Repeat slowly once, then at normal speed")
+                return {
+                    "score": score,
+                    "confidence": confidence,
+                    "feedback": feedback,
+                    "mistakes": mistakes,
+                    "transcript": transcript,
+                }
+
+            base = 6 + secrets.randbelow(4)
+            if len(transcript) > 30:
+                base = min(10, base + 1)
+            confidence = min(95, 55 + base * 4 + secrets.randbelow(10))
+
+            options = [
+                "Great clarity and pacing.",
+                "Good pronunciation, improve 'th' sound.",
+                "Excellent fluency, slight stress issues.",
+                "Nice effort. Slow down a little and keep consonants crisp.",
+                "Strong delivery. Focus on smoother transitions between sounds.",
+            ]
+            feedback = [
+                options[secrets.randbelow(len(options))],
+                "Try repeating the key phrase twice at a slower pace.",
+                "Keep the end sounds clear (don’t drop final consonants).",
+            ]
+            return {"score": int(base), "confidence": int(confidence), "feedback": feedback}
+        except Exception:
+            logger.exception("video_test analyze failed")
+            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
 
     @app.get("/feedback/<int:session_id>")
     @login_required

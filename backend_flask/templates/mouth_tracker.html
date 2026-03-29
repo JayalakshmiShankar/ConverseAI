@@ -1,0 +1,250 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Mouth Tracker • ConverseAI{% endblock %}
+{% block header_title %}Mouth Tracker{% endblock %}
+
+{% block content %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mouth_tracker.css') }}" />
+
+  <section class="card">
+    <div class="cardTitle">Target Sentence</div>
+    <div class="mouthSentence">{{ sentence["text"] }}</div>
+    <div class="muted">Keep your face steady and mouth visible while speaking.</div>
+  </section>
+
+  <section class="card mouthGrid">
+    <div class="mouthLeft">
+      <div class="mouthCamFrame">
+        <video id="mtVideo" autoplay playsinline muted></video>
+        <div class="mouthOverlay" id="mtOverlay" hidden>
+          <div class="mouthOverlayText">Allow camera access to continue</div>
+        </div>
+      </div>
+
+      <div class="mouthStatusRow">
+        <div class="mouthDot" id="mtDot" aria-hidden="true"></div>
+        <div>
+          <div class="mouthStatusTitle" id="mtStatusTitle">Face check</div>
+          <div class="muted" id="mtStatusSub">Waiting for camera…</div>
+        </div>
+      </div>
+
+      <div class="mouthWarn" id="mtWarn" hidden>Please move closer to camera and keep mouth visible.</div>
+
+      <div class="mouthActions">
+        <button class="btnPrimary" type="button" id="mtStart">Start Recording</button>
+        <button class="btnGhost" type="button" id="mtStop" disabled>Stop</button>
+      </div>
+    </div>
+
+    <div class="mouthRight">
+      <div class="mouthPanel">
+        <div class="mouthPanelTitle">Recording</div>
+        <div class="muted" id="mtRecState">Ready</div>
+      </div>
+
+      <div class="mouthPanel">
+        <div class="mouthPanelTitle">Mouth Movement</div>
+        <div class="mouthBullets">
+          <div class="mouthBullet">
+            <span class="mouthLegend mouthLegendGreen"></span>
+            <span>Green indicator: mouth detected (speaking)</span>
+          </div>
+          <div class="mouthBullet">
+            <span class="mouthLegend mouthLegendRed"></span>
+            <span>Red indicator: mouth not visible / closed</span>
+          </div>
+        </div>
+      </div>
+
+      <form id="mtUpload" method="post" action="{{ url_for('upload_audio') }}" enctype="multipart/form-data" hidden>
+        <input type="hidden" name="sentence_id" value="{{ sentence['id'] }}" />
+        <input type="file" name="audio" id="mtAudioFile" />
+      </form>
+    </div>
+  </section>
+
+  <script>
+    (function () {
+      var video = document.getElementById("mtVideo");
+      var overlay = document.getElementById("mtOverlay");
+      var dot = document.getElementById("mtDot");
+      var title = document.getElementById("mtStatusTitle");
+      var sub = document.getElementById("mtStatusSub");
+      var warn = document.getElementById("mtWarn");
+      var startBtn = document.getElementById("mtStart");
+      var stopBtn = document.getElementById("mtStop");
+      var recState = document.getElementById("mtRecState");
+      var uploadForm = document.getElementById("mtUpload");
+      var audioInput = document.getElementById("mtAudioFile");
+
+      var stream = null;
+      var recorder = null;
+      var chunks = [];
+      var pollTimer = null;
+      var silentTimer = null;
+      var lastOpenAt = 0;
+      var canvas = document.createElement("canvas");
+      var ctx = canvas.getContext("2d");
+
+      function setDot(state) {
+        dot.classList.remove("isGreen");
+        dot.classList.remove("isRed");
+        dot.classList.remove("isPulse");
+        if (state === "open") {
+          dot.classList.add("isGreen");
+          dot.classList.add("isPulse");
+        } else if (state === "closed" || state === "not_visible") {
+          dot.classList.add("isRed");
+        }
+      }
+
+      async function initCam() {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+          video.srcObject = stream;
+          if (overlay) overlay.hidden = true;
+          title.textContent = "Face tracking active";
+          sub.textContent = "Keep your mouth visible.";
+        } catch (e) {
+          if (overlay) overlay.hidden = false;
+          title.textContent = "Camera blocked";
+          sub.textContent = "Enable camera permission.";
+          setDot("not_visible");
+        }
+      }
+
+      async function sendFrame() {
+        if (!stream || !video.videoWidth || !video.videoHeight || !ctx) return;
+        var vw = video.videoWidth;
+        var vh = video.videoHeight;
+        var tw = 320;
+        var th = Math.round((vh / vw) * tw);
+        canvas.width = tw;
+        canvas.height = th;
+        ctx.drawImage(video, 0, 0, tw, th);
+
+        var blob = await new Promise(function (resolve) {
+          canvas.toBlob(function (b) { resolve(b); }, "image/jpeg", 0.72);
+        });
+        if (!blob) return;
+
+        var fd = new FormData();
+        fd.append("frame", blob, "frame.jpg");
+
+        var res = await fetch("/mouth-status", { method: "POST", body: fd }).catch(function () { return null; });
+        if (!res) return;
+        var data = await res.json().catch(function () { return null; });
+        if (!data) return;
+
+        var mouth = data.mouth || "not_visible";
+        setDot(mouth);
+
+        if (mouth === "open") {
+          lastOpenAt = Date.now();
+          title.textContent = "Mouth detected";
+          sub.textContent = "Speaking (confidence " + String(data.confidence || 0) + ")";
+          if (warn) warn.hidden = true;
+          return;
+        }
+
+        if (mouth === "closed") {
+          title.textContent = "Mouth closed";
+          sub.textContent = "Open your mouth a bit more while speaking.";
+          return;
+        }
+
+        if (mouth === "not_available") {
+          title.textContent = "Detector unavailable";
+          sub.textContent = "Install OpenCV + MediaPipe to enable mouth detection.";
+          return;
+        }
+
+        title.textContent = "Mouth not visible";
+        sub.textContent = "Move closer and keep face centered.";
+      }
+
+      function startPolling() {
+        stopPolling();
+        lastOpenAt = Date.now();
+        pollTimer = setInterval(function () {
+          sendFrame();
+        }, 260);
+      }
+
+      function stopPolling() {
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      function startSilentWatch() {
+        if (silentTimer) clearInterval(silentTimer);
+        silentTimer = setInterval(function () {
+          var age = Date.now() - lastOpenAt;
+          if (age >= 3000) {
+            if (warn) warn.hidden = false;
+          }
+        }, 250);
+      }
+
+      function stopSilentWatch() {
+        if (silentTimer) clearInterval(silentTimer);
+        silentTimer = null;
+        if (warn) warn.hidden = true;
+      }
+
+      async function startRecording() {
+        if (!stream) await initCam();
+        if (!stream) return;
+
+        chunks = [];
+        var audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        recorder = new MediaRecorder(audioStream);
+        recorder.ondataavailable = function (e) {
+          if (e.data && e.data.size) chunks.push(e.data);
+        };
+        recorder.onstop = function () {
+          try {
+            audioStream.getTracks().forEach(function (t) { t.stop(); });
+          } catch {}
+          var blob = new Blob(chunks, { type: "audio/webm" });
+          var file = new File([blob], "recording.webm", { type: "audio/webm" });
+          if (audioInput) {
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            audioInput.files = dt.files;
+          }
+          if (uploadForm) uploadForm.submit();
+        };
+
+        recorder.start();
+        recState.textContent = "Recording…";
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        startPolling();
+        startSilentWatch();
+
+        setTimeout(function () {
+          if (recorder && recorder.state === "recording") stopRecording();
+        }, 6500);
+      }
+
+      function stopRecording() {
+        if (!recorder) return;
+        try {
+          recorder.stop();
+        } catch {}
+        recState.textContent = "Uploading…";
+        stopBtn.disabled = true;
+        stopPolling();
+        stopSilentWatch();
+      }
+
+      if (startBtn) startBtn.addEventListener("click", startRecording);
+      if (stopBtn) stopBtn.addEventListener("click", stopRecording);
+
+      initCam();
+    })();
+  </script>
+{% endblock %}
+

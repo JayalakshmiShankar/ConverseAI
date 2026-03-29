@@ -1,0 +1,76 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Streaks • ConverseAI{% endblock %}
+{% block header_title %}Streaks{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="cardTitleRow">
+      <div class="cardTitle">Streaks</div>
+      {% if demo %}
+        <span class="pillTag">DEMO</span>
+      {% endif %}
+    </div>
+    <div class="muted">Complete one test per day to keep your streak.</div>
+
+    <div class="streakRow">
+      {% for filled in circles %}
+        <div class="streakDot {% if filled %}streakDotOn{% endif %}"></div>
+      {% endfor %}
+      <div class="streakText"><strong>{{ streak_days }}</strong> day streak</div>
+    </div>
+
+    <div class="pointsCard">
+      <div class="pointsLeft">
+        <div class="muted">Points</div>
+        <div class="pointsNum">{{ points }} <span class="muted">pts</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cardTitle">Daily performance</div>
+    <div class="muted">Scores are based on your tests each day.</div>
+
+    <div class="dailyGrid">
+      {% for d in daily_scores %}
+        {% set s = (d["avg_score"]|default(0))|float %}
+        {% set sc = "dayScoreRed" %}
+        {% if s >= 80 %}{% set sc = "dayScoreGreen" %}{% elif s >= 60 %}{% set sc = "dayScoreYellow" %}{% endif %}
+        <div class="dayCard">
+          <div class="dayTop">
+            <div class="dayDate">{{ d["date"] }}</div>
+            <div class="dayTests">{{ d["tests"] }} test{% if d["tests"] != 1 %}s{% endif %}</div>
+          </div>
+          <div class="dayScoreRow">
+            <div class="dayScoreBadge {{ sc }}">{{ "%.0f"|format(s) }}</div>
+            <div class="dayBar">
+              <div class="dayBarFill {{ sc }}" style="width: {{ s }}%"></div>
+            </div>
+          </div>
+          <div class="muted dayMeta">Avg score /100</div>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="cardTitle">Motivational Words</div>
+    <div class="motivationBox" id="motivationBox">{{ motivational }}</div>
+    <div class="muted">Keep going. Consistency beats perfection.</div>
+  </section>
+
+  <script>
+    (function () {
+      var words = [
+        "You're improving every day!",
+        "Consistency beats perfection!",
+        "Small steps make big progress.",
+        "Your confidence is growing.",
+        "Keep your pace steady and clear."
+      ];
+      var box = document.getElementById("motivationBox");
+      if (box) box.textContent = words[Math.floor(Math.random() * words.length)];
+    })();
+  </script>
+{% endblock %}

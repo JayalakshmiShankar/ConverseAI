@@ -7,59 +7,80 @@
 {% endblock %}
 
 {% block content %}
-  <div class="grid2">
-    <section class="card cardBlue">
-      <div class="cardTitle">Your Sentence</div>
-      <div class="sentenceBox">
-        {{ sentence["text"] }}
-      </div>
-      <div class="muted">Read it naturally. Keep your pace steady and clear.</div>
+  <div class="practiceTopGrid">
+    <section class="card">
+      <div class="cardTitle">Target Sentence</div>
+      <textarea
+        class="practiceSentenceBox"
+        name="custom_text"
+        form="uploadForm"
+        rows="3"
+        spellcheck="false"
+      >{{ sentence["text"] }}</textarea>
+
+      <form id="uploadForm" class="form" method="post" action="{{ url_for('upload_audio') }}" enctype="multipart/form-data">
+        <input type="hidden" name="sentence_id" value="{{ sentence['id'] }}" />
+        <input type="hidden" name="spoken_text" id="spokenText" value="" />
+
+        <div class="recRow practiceRecRow">
+          <div class="micWrap" id="micWrap" aria-hidden="true">
+            <div class="micCore"></div>
+            <div class="micRing"></div>
+          </div>
+          <button class="btnPrimary recBtn practicePrimaryBtn" type="button" id="startRec">Start Recording</button>
+          <button class="btnGhost recBtn" type="button" id="stopRec" disabled>Stop</button>
+          <div class="recStatus" id="recStatus">Ready</div>
+        </div>
+
+        <div class="audioPreview" id="audioPreview" hidden>
+          <audio id="audioPlayer" controls></audio>
+        </div>
+
+        <label class="field">
+          <span class="fieldLabel">Or upload audio</span>
+          <input class="input" type="file" name="audio" id="audioFile" accept="audio/*" />
+        </label>
+
+        <button class="btnPrimary" type="submit" id="analyzeBtn">
+          <span>Analyze pronunciation</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
+        <div class="muted" id="analyzeHint">Tip: Record 3–7 seconds for best results.</div>
+      </form>
     </section>
 
-    <section class="card cardGreen">
-      <div class="cardTitle">Webcam Guide</div>
-      <div class="muted">Optional: Keep your mouth visible for better articulation awareness.</div>
-      <div class="webcamBox">
-        <video id="cam" autoplay playsinline muted></video>
-        <div class="webcamHint">Align your face in the frame</div>
-      </div>
-    </section>
+    <div class="practiceSideCol">
+      <section class="card">
+        <div class="cardTitle">Visual Feedback</div>
+        <div class="webcamBox">
+          <video id="cam" autoplay playsinline muted></video>
+          <div class="webcamHint">Align your face in the frame</div>
+        </div>
+        <div class="faceStatusRow" id="camStatusRow">
+          <div class="faceStatusIcon" id="camStatusIcon" aria-hidden="true">✓</div>
+          <div class="faceStatusText" id="camStatusText">Face tracking active. Keep your mouth visible.</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardTitle">Instructions</div>
+        <ul class="bulletList">
+          <li>Read the target sentence clearly.</li>
+          <li>Maintain eye contact with the camera.</li>
+          <li>Wait for the score and feedback.</li>
+        </ul>
+      </section>
+    </div>
   </div>
 
-  <section class="card">
-    <div class="cardTitle">Record & Upload</div>
-    <div class="muted">Record using your microphone or upload an existing audio file.</div>
-
-    <form id="uploadForm" class="form" method="post" action="{{ url_for('upload_audio') }}" enctype="multipart/form-data">
-      <input type="hidden" name="sentence_id" value="{{ sentence['id'] }}" />
-
-      <div class="recRow">
-        <button class="btnPrimary recBtn" type="button" id="startRec">Start recording</button>
-        <button class="btnGhost recBtn" type="button" id="stopRec" disabled>Stop</button>
-        <div class="recStatus" id="recStatus">Ready</div>
-      </div>
-
-      <div class="audioPreview" id="audioPreview" hidden>
-        <audio id="audioPlayer" controls></audio>
-      </div>
-
-      <label class="field">
-        <span class="fieldLabel">Or upload audio</span>
-        <input class="input" type="file" name="audio" id="audioFile" accept="audio/*" />
-      </label>
-
-      <button class="btnPrimary" type="submit" id="analyzeBtn">
-        <span>Analyze pronunciation</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-          <path d="M5 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
-
-      <div class="muted" id="analyzeHint">Tip: Record 3–7 seconds for best results.</div>
-    </form>
-  </section>
+  <div class="miniLoad" id="miniLoad" hidden>
+    <div class="aiSpinnerSm"></div>
+    <div class="muted" id="miniLoadText">Analyzing…</div>
+  </div>
 
   <script src="{{ url_for('static', filename='practice.js') }}"></script>
 {% endblock %}
-

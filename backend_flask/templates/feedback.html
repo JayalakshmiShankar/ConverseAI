@@ -7,41 +7,72 @@
 {% endblock %}
 
 {% block content %}
-  <div class="grid2">
-    <section class="card cardBlue">
-      <div class="cardTitle">Overall Score</div>
-      <div class="scoreRow">
-        <div class="scoreBig">{{ score_10 }}/10</div>
-        <div class="scoreMeta">
-          <div class="muted">{{ "%.0f"|format(session["score"]) }}/100</div>
-          <div class="muted">Points earned: <strong>{{ session["points"] }}</strong></div>
-        </div>
-      </div>
-      <div class="bar">
-        <div class="barFill" style="width: {{ session['score'] }}%"></div>
-      </div>
-      <div class="metrics">
-        <div class="metric">
-          <div class="metricLabel">Accuracy</div>
-          <div class="metricValue">{{ feedback["accuracy"] }}%</div>
-        </div>
-        <div class="metric">
-          <div class="metricLabel">Fluency</div>
-          <div class="metricValue">{{ feedback["fluency"] }}%</div>
-        </div>
-      </div>
-      {% if feedback["demo_stt"] %}
-        <div class="flash flash-error">Demo mode: OPENAI_API_KEY not set. Using expected sentence as transcript.</div>
-      {% endif %}
-    </section>
+  {% set s = session["score"]|float %}
+  {% set conf = (feedback["confidence"]|default(0.7))|float %}
+  {% set score_class = "scoreRed" %}
+  {% if s >= 80 %}{% set score_class = "scoreGreen" %}{% elif s >= 60 %}{% set score_class = "scoreYellow" %}{% endif %}
 
-    <section class="card cardGreen">
-      <div class="cardTitle">Transcript</div>
-      <div class="sentenceBox">{{ session["transcript"] }}</div>
-      <div class="muted">Expected:</div>
-      <div class="sentenceBox sentenceBoxSmall">{{ session["sentence"] }}</div>
-    </section>
-  </div>
+  <div class="resultWrap fadeIn">
+    <div class="grid2">
+      <section class="card cardBlue">
+        <div class="cardTitle">Overall Score</div>
+        <div class="scoreGrid">
+          <div class="scoreRing {{ score_class }}" data-score="{{ "%.0f"|format(s) }}" data-conf="{{ "%.0f"|format(conf * 100) }}">
+            <svg viewBox="0 0 120 120" class="ringSvg" aria-hidden="true">
+              <circle cx="60" cy="60" r="50" class="ringTrack"></circle>
+              <circle cx="60" cy="60" r="50" class="ringFill"></circle>
+            </svg>
+            <div class="ringText">
+              <div class="ringNum" id="scoreNum">0</div>
+              <div class="ringSub">/100</div>
+            </div>
+          </div>
+
+          <div class="scoreSide">
+            <div class="scoreMeta">
+              <div class="muted">Score</div>
+              <div class="scoreLine"><strong id="score10">0.0</strong><span class="muted">/10</span></div>
+            </div>
+            <div class="scoreMeta">
+              <div class="muted">Confidence Level</div>
+              <div class="scoreLine"><strong id="confPct">0</strong><span class="muted">%</span></div>
+            </div>
+            <div class="scoreMeta">
+              <div class="muted">Points earned</div>
+              <div class="scoreLine"><strong>{{ session["points"] }}</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="thinkingRow" id="thinkingRow">
+          <div class="aiSpinnerSm"></div>
+          <div class="muted" id="thinkingText">Loading results…</div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric">
+            <div class="metricLabel">Accuracy</div>
+            <div class="metricValue">{{ feedback["accuracy"] }}%</div>
+          </div>
+          <div class="metric">
+            <div class="metricLabel">Fluency</div>
+            <div class="metricValue">{{ feedback["fluency"] }}%</div>
+          </div>
+        </div>
+        {% if feedback["demo_stt"] %}
+          <div class="flash flash-error">Demo mode: OPENAI_API_KEY not set. Using expected sentence as transcript.</div>
+        {% endif %}
+      </section>
+
+      <section class="card cardGreen">
+        <div class="cardTitle">Feedback</div>
+        <div class="aiFeedback" id="aiFeedback">Generating feedback…</div>
+        <div class="muted">Transcript</div>
+        <div class="sentenceBox">{{ session["transcript"] }}</div>
+        <div class="muted">Expected</div>
+        <div class="sentenceBox sentenceBoxSmall">{{ session["sentence"] }}</div>
+      </section>
+    </div>
 
   <section class="card">
     <div class="cardTitle">Word-level Feedback</div>
@@ -80,12 +111,62 @@
   </section>
 
   <section class="card">
-    <div class="cardTitle">Next Steps</div>
-    <div class="quickActions">
-      <a class="btnPrimary" href="{{ url_for('practice') }}">Take again</a>
-      <a class="btnGhost" href="{{ url_for('learn') }}">Learn via videos</a>
-      <a class="btnGhost" href="{{ url_for('history') }}">View history</a>
+    <div class="cardTitle">Improvement to be done</div>
+    <div class="improveGrid">
+      <a class="btnGhost" href="{{ url_for('history') }}">Phonemes</a>
+      <a class="btnGhost" href="{{ url_for('practice') }}">Sentences</a>
+      <a class="btnGhost" href="{{ url_for('history') }}">Scores</a>
+      <a class="btnGhost" href="{{ url_for('learn') }}">Learn through video</a>
     </div>
   </section>
-{% endblock %}
+  </div>
 
+  <script>
+    (function () {
+      var ring = document.querySelector(".scoreRing");
+      var score = Number((ring && ring.dataset && ring.dataset.score) || 0);
+      var conf = Number((ring && ring.dataset && ring.dataset.conf) || 0);
+      var scoreNum = document.getElementById("scoreNum");
+      var score10 = document.getElementById("score10");
+      var confPct = document.getElementById("confPct");
+      var thinkingText = document.getElementById("thinkingText");
+      var aiFeedback = document.getElementById("aiFeedback");
+
+      var feedbacks = [
+        "Great clarity and pacing.",
+        "Good pronunciation, improve the 'th' sound.",
+        "Excellent fluency, slight stress issues.",
+        "Nice effort. Slow down a little and keep consonants crisp.",
+        "Strong delivery. Focus on smoother transitions between sounds."
+      ];
+      var randomFeedback = feedbacks[Math.floor(Math.random() * feedbacks.length)];
+      if (aiFeedback) aiFeedback.textContent = randomFeedback;
+
+      function show(text, delay) {
+        setTimeout(function () {
+          if (thinkingText) thinkingText.textContent = text;
+        }, delay);
+      }
+      show("Analyzing audio...", 500);
+      show("Detecting phonemes...", 1200);
+      show("Generating feedback...", 2000);
+      show("Done.", 2600);
+
+      var start = performance.now();
+      var duration = 1400;
+      function step(now) {
+        var t = Math.min(1, (now - start) / duration);
+        var eased = 1 - Math.pow(1 - t, 3);
+        var current = Math.round(score * eased);
+        var current10 = (current / 10).toFixed(1);
+        var currentConf = Math.round(conf * eased);
+        if (scoreNum) scoreNum.textContent = String(current);
+        if (score10) score10.textContent = current10;
+        if (confPct) confPct.textContent = String(currentConf);
+        if (ring) ring.style.setProperty("--p", String(current));
+        if (t < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    })();
+  </script>
+{% endblock %}

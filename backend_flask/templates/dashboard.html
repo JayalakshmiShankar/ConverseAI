@@ -2,94 +2,132 @@
 
 {% block title %}Home • ConverseAI{% endblock %}
 {% block header_title %}Home{% endblock %}
-{% block header_right %}
-  <a class="btnGhost" href="{{ url_for('language') }}">Change language</a>
-{% endblock %}
 
 {% block content %}
-  <section class="card homeHeaderCard">
-    <div class="homeHeader">
-      <div>
-        <div class="homeTitle">Converse</div>
-        <div class="muted">Select a language and start recording.</div>
-      </div>
-      <div class="homeStats">
-        <div class="homeStat">
-          <div class="homeStatTop">Streak</div>
-          <div class="homeStatNum">🔥 {{ streak_days }}</div>
-        </div>
-        <div class="homeStat">
-          <div class="homeStatTop">Points</div>
-          <div class="homeStatNum">{{ points }}</div>
-        </div>
-        <div class="homeStat">
-          <div class="homeStatTop">Last</div>
-          <div class="homeStatNum">
-            {% if last_score is not none %}{{ "%.0f"|format(last_score) }}{% else %}—{% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="searchRow">
-      <div class="searchIcon">⌕</div>
-      <input id="langSearch" class="searchInput" type="text" placeholder="Search language" autocomplete="off" />
-    </div>
+  <section class="card">
+    <div class="cardTitle">Choose a language</div>
+    <div class="muted">Pick a language to start your test.</div>
   </section>
 
   <form id="setLanguageForm" method="post" action="{{ url_for('set_language') }}">
     <input type="hidden" name="language" id="selectedLanguage" value="" />
+    {% set icons = {"en-US": "🇺🇸", "en-GB": "🇬🇧", "de-DE": "🇩🇪", "es-ES": "🇪🇸"} %}
     <div class="homeLangGrid" id="langGrid">
       {% for l in languages %}
+        {% set lid = l["id"] %}
         <button
           type="button"
           class="homeLangCard {% if profile and profile['selected_language'] == l['id'] %}homeLangCardActive{% endif %}"
-          data-label="{{ l['label']|lower }}"
           data-id="{{ l['id'] }}"
+          data-label="{{ l['label'] }}"
         >
-          <div class="homeLangLabel">{{ l["label"] }}</div>
-          <div class="muted">{{ l["id"] }}</div>
+          <div class="homeLangTop">
+            <div class="homeLangIcon" aria-hidden="true">{{ icons.get(l["id"], "🌐") }}</div>
+            <div>
+              <div class="homeLangLabel">{{ l["label"] }}</div>
+              <div class="muted">{{ l["id"] }}</div>
+            </div>
+          </div>
+          <div class="homeLangArt" aria-hidden="true">
+            {% if lid == "en-US" %}
+              <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="bgUs" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#0b3d91" stop-opacity="0.16"/>
+                    <stop offset="1" stop-color="#ef4444" stop-opacity="0.12"/>
+                  </linearGradient>
+                </defs>
+                <rect width="320" height="180" rx="18" fill="url(#bgUs)"/>
+                <rect x="18" y="22" width="120" height="84" rx="12" fill="#0b3d91" fill-opacity="0.9"/>
+                <g fill="#ffffff" fill-opacity="0.9">
+                  <circle cx="36" cy="40" r="3"/><circle cx="52" cy="52" r="3"/><circle cx="68" cy="40" r="3"/><circle cx="84" cy="52" r="3"/><circle cx="100" cy="40" r="3"/>
+                  <circle cx="36" cy="68" r="3"/><circle cx="52" cy="80" r="3"/><circle cx="68" cy="68" r="3"/><circle cx="84" cy="80" r="3"/><circle cx="100" cy="68" r="3"/>
+                  <circle cx="36" cy="96" r="3"/><circle cx="52" cy="108" r="3"/><circle cx="68" cy="96" r="3"/><circle cx="84" cy="108" r="3"/><circle cx="100" cy="96" r="3"/>
+                </g>
+                <g>
+                  <rect x="152" y="28" width="150" height="18" rx="9" fill="#ef4444" fill-opacity="0.75"/>
+                  <rect x="152" y="54" width="120" height="18" rx="9" fill="#ffffff" fill-opacity="0.75"/>
+                  <rect x="152" y="80" width="150" height="18" rx="9" fill="#ef4444" fill-opacity="0.75"/>
+                  <rect x="152" y="106" width="110" height="18" rx="9" fill="#ffffff" fill-opacity="0.75"/>
+                  <rect x="152" y="132" width="150" height="18" rx="9" fill="#ef4444" fill-opacity="0.75"/>
+                </g>
+              </svg>
+            {% elif lid == "en-GB" %}
+              <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="bgUk" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#1d4ed8" stop-opacity="0.16"/>
+                    <stop offset="1" stop-color="#ef4444" stop-opacity="0.12"/>
+                  </linearGradient>
+                </defs>
+                <rect width="320" height="180" rx="18" fill="url(#bgUk)"/>
+                <path d="M0 0 L320 180" stroke="#ffffff" stroke-width="42" stroke-opacity="0.85"/>
+                <path d="M320 0 L0 180" stroke="#ffffff" stroke-width="42" stroke-opacity="0.85"/>
+                <path d="M0 0 L320 180" stroke="#ef4444" stroke-width="18" stroke-opacity="0.8"/>
+                <path d="M320 0 L0 180" stroke="#ef4444" stroke-width="18" stroke-opacity="0.8"/>
+                <rect x="0" y="74" width="320" height="32" fill="#ffffff" fill-opacity="0.9"/>
+                <rect x="144" y="0" width="32" height="180" fill="#ffffff" fill-opacity="0.9"/>
+                <rect x="0" y="82" width="320" height="16" fill="#ef4444" fill-opacity="0.85"/>
+                <rect x="152" y="0" width="16" height="180" fill="#ef4444" fill-opacity="0.85"/>
+              </svg>
+            {% elif lid == "de-DE" %}
+              <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="bgDe" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#111827" stop-opacity="0.16"/>
+                    <stop offset="1" stop-color="#f59e0b" stop-opacity="0.14"/>
+                  </linearGradient>
+                </defs>
+                <rect width="320" height="180" rx="18" fill="url(#bgDe)"/>
+                <rect x="18" y="28" width="284" height="36" rx="12" fill="#111827" fill-opacity="0.85"/>
+                <rect x="18" y="72" width="284" height="36" rx="12" fill="#ef4444" fill-opacity="0.78"/>
+                <rect x="18" y="116" width="284" height="36" rx="12" fill="#f59e0b" fill-opacity="0.78"/>
+              </svg>
+            {% elif lid == "es-ES" %}
+              <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <defs>
+                  <linearGradient id="bgEs" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#ef4444" stop-opacity="0.14"/>
+                    <stop offset="1" stop-color="#f59e0b" stop-opacity="0.14"/>
+                  </linearGradient>
+                </defs>
+                <rect width="320" height="180" rx="18" fill="url(#bgEs)"/>
+                <rect x="18" y="26" width="284" height="38" rx="12" fill="#ef4444" fill-opacity="0.82"/>
+                <rect x="18" y="68" width="284" height="44" rx="12" fill="#f59e0b" fill-opacity="0.82"/>
+                <rect x="18" y="116" width="284" height="38" rx="12" fill="#ef4444" fill-opacity="0.82"/>
+                <rect x="38" y="78" width="56" height="24" rx="10" fill="#111827" fill-opacity="0.18"/>
+              </svg>
+            {% else %}
+              <svg viewBox="0 0 320 180" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <rect width="320" height="180" rx="18" fill="rgba(37, 99, 235, 0.08)"/>
+                <circle cx="78" cy="92" r="40" fill="rgba(37, 99, 235, 0.14)"/>
+                <rect x="140" y="60" width="150" height="20" rx="10" fill="rgba(15, 23, 42, 0.14)"/>
+                <rect x="140" y="90" width="120" height="20" rx="10" fill="rgba(15, 23, 42, 0.12)"/>
+              </svg>
+            {% endif %}
+          </div>
+          <div class="homeLangFoot">
+          </div>
         </button>
       {% endfor %}
     </div>
   </form>
 
-  <section class="card">
-    <div class="cardTitle">Improvement to be done</div>
-    <div class="improveGrid">
-      <a class="btnGhost" href="{{ url_for('history') }}">Phonemes</a>
-      <a class="btnGhost" href="{{ url_for('practice') }}">Sentences</a>
-      <a class="btnGhost" href="{{ url_for('history') }}">Scores</a>
-      <a class="btnGhost" href="{{ url_for('learn') }}">Learn through video</a>
-    </div>
-  </section>
-
   <script>
     (function () {
-      var search = document.getElementById("langSearch");
       var grid = document.getElementById("langGrid");
       var hidden = document.getElementById("selectedLanguage");
       var form = document.getElementById("setLanguageForm");
-
-      function filter() {
-        var q = (search.value || "").trim().toLowerCase();
-        var cards = grid.querySelectorAll("[data-label]");
-        cards.forEach(function (c) {
-          var label = c.getAttribute("data-label") || "";
-          var id = (c.getAttribute("data-id") || "").toLowerCase();
-          var show = !q || label.indexOf(q) !== -1 || id.indexOf(q) !== -1;
-          c.style.display = show ? "" : "none";
+      if (grid)
+        grid.addEventListener("click", function (e) {
+          var t = e.target;
+          var btn = t && t.closest ? t.closest("button[data-id]") : null;
+          if (!btn) return;
+          var id = btn.getAttribute("data-id") || "";
+          if (!id) return;
+          hidden.value = id;
+          form.submit();
         });
-      }
-
-      grid.addEventListener("click", function (e) {
-        var btn = e.target.closest("button[data-id]");
-        if (!btn) return;
-        hidden.value = btn.getAttribute("data-id") || "";
-        form.submit();
-      });
-
-      if (search) search.addEventListener("input", filter);
     })();
   </script>
 {% endblock %}

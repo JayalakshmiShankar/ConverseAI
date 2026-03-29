@@ -1,0 +1,175 @@
+.mouthSentence {
+  margin-top: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 16px;
+  line-height: 1.5;
+  font-weight: 900;
+}
+
+.mouthGrid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 14px;
+}
+
+.mouthCamFrame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow);
+}
+
+.mouthCamFrame video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.mouthOverlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+.mouthOverlayText {
+  color: white;
+  font-weight: 950;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.mouthStatusRow {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.mouthDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.8);
+  box-shadow: rgba(239, 68, 68, 0.25) 0 0 0 4px;
+}
+
+.mouthDot.isGreen {
+  background: rgba(16, 185, 129, 0.92);
+  box-shadow: rgba(16, 185, 129, 0.24) 0 0 0 4px;
+}
+
+.mouthDot.isRed {
+  background: rgba(239, 68, 68, 0.85);
+  box-shadow: rgba(239, 68, 68, 0.22) 0 0 0 4px;
+}
+
+.mouthDot.isPulse {
+  animation: mouthPulse 900ms ease-in-out infinite;
+}
+
+@keyframes mouthPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: rgba(16, 185, 129, 0.2) 0 0 0 4px;
+  }
+  70% {
+    transform: scale(1.1);
+    box-shadow: rgba(16, 185, 129, 0.12) 0 0 0 10px;
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: rgba(16, 185, 129, 0.2) 0 0 0 4px;
+  }
+}
+
+.mouthStatusTitle {
+  font-weight: 950;
+}
+
+.mouthWarn {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  background: rgba(239, 68, 68, 0.08);
+  font-weight: 900;
+}
+
+.mouthActions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mouthPanel {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--shadow);
+}
+
+.mouthPanel + .mouthPanel {
+  margin-top: 12px;
+}
+
+.mouthPanelTitle {
+  font-weight: 950;
+  margin-bottom: 8px;
+}
+
+.mouthBullets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mouthBullet {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-weight: 850;
+  color: rgba(15, 23, 42, 0.8);
+}
+
+.mouthLegend {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.mouthLegendGreen {
+  background: rgba(16, 185, 129, 0.9);
+  box-shadow: rgba(16, 185, 129, 0.22) 0 0 0 4px;
+}
+
+.mouthLegendRed {
+  background: rgba(239, 68, 68, 0.88);
+  box-shadow: rgba(239, 68, 68, 0.22) 0 0 0 4px;
+}
+
+@media (max-width: 980px) {
+  .mouthGrid {
+    grid-template-columns: 1fr;
+  }
+}
+

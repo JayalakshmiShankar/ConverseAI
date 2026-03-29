@@ -1,0 +1,57 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}AIConvo • ConverseAI{% endblock %}
+{% block header_title %}AIConvo{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="cardTitleRow">
+      <div class="cardTitle">AIConvo</div>
+      <span class="pillTag">Practice</span>
+    </div>
+    <div class="muted">Speak a short sentence. The AI replies with a phrase to repeat.</div>
+    <div class="promptChips" id="promptChips">
+      <button class="chipBtn" type="button" data-prompt="How are you?">How are you?</button>
+      <button class="chipBtn" type="button" data-prompt="I want to improve my pronunciation.">Pronunciation</button>
+      <button class="chipBtn" type="button" data-prompt="Can you help me practice an interview answer?">Interview</button>
+      <button class="chipBtn" type="button" data-prompt="Give me a short phrase to repeat.">Short phrase</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="chatWrap" id="chatWrap">
+      <div class="chatBubble chatA">
+        <div class="chatMeta">AI</div>
+        <div class="chatText">Tap the mic and say: “How are you?”</div>
+      </div>
+    </div>
+
+    <div class="chatControls">
+      <button class="micBtn" type="button" id="chatMic">
+        <span class="micDot"></span>
+        <span id="micLabel">Start</span>
+      </button>
+
+      <div class="wave" id="wave" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+
+      <button class="btnGhost" type="button" id="chatContinue">Continue Conversation</button>
+    </div>
+
+    <div class="chatTextRow">
+      <input class="input" id="chatTextInput" type="text" placeholder="Type a sentence (optional)" autocomplete="off" />
+      <button class="btnPrimary" type="button" id="chatSend">Send</button>
+    </div>
+
+    <div class="miniLoad" id="chatMiniLoad" hidden>
+      <div class="aiSpinnerSm"></div>
+      <div class="muted" id="chatMiniLoadText">AI is replying…</div>
+    </div>
+  </section>
+
+  <script>
+    window.__DEMO_MODE__ = {{ "true" if demo else "false" }};
+  </script>
+  <script src="{{ url_for('static', filename='conversation.js') }}"></script>
+{% endblock %}
