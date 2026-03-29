@@ -10,13 +10,26 @@
   <div class="practiceTopGrid">
     <section class="card">
       <div class="cardTitle">Target Sentence</div>
+      <div class="practiceSentenceDisplay" id="sentenceDisplay">
+        {% set words = sentence["text"].split() %}
+        {% for word in words %}
+          <span class="p-word" data-word="{{ word|lower|replace('.', '')|replace(',', '')|replace('?', '')|replace('!', '') }}">{{ word }}</span>
+        {% endfor %}
+      </div>
+      
       <textarea
         class="practiceSentenceBox"
         name="custom_text"
         form="uploadForm"
         rows="3"
         spellcheck="false"
+        style="display: none;"
       >{{ sentence["text"] }}</textarea>
+
+      <div class="waveformContainer" id="waveformContainer" hidden>
+        <canvas id="waveform" class="waveformCanvas"></canvas>
+        <div class="silenceWarning" id="silenceWarning" hidden>⚠ Too quiet! Speak louder.</div>
+      </div>
 
       <form id="uploadForm" class="form" method="post" action="{{ url_for('upload_audio') }}" enctype="multipart/form-data">
         <input type="hidden" name="sentence_id" value="{{ sentence['id'] }}" />
@@ -55,9 +68,10 @@
 
     <div class="practiceSideCol">
       <section class="card">
-        <div class="cardTitle">Visual Feedback</div>
+        <div class="cardTitle">Visual Capture</div>
         <div class="webcamBox">
           <video id="cam" autoplay playsinline muted></video>
+          <canvas id="overlay" class="webcamOverlay"></canvas>
           <div class="webcamHint">Align your face in the frame</div>
         </div>
         <div class="faceStatusRow" id="camStatusRow">

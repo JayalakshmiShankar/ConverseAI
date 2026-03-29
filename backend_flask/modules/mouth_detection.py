@@ -13,6 +13,7 @@ mouth_bp = Blueprint("mouth_detection", __name__)
 class MouthResult:
     mouth: str
     confidence: float
+    landmarks: dict[str, dict[str, float]] | None = None
 
 
 class MouthDetector:
@@ -44,6 +45,7 @@ class MouthDetector:
     def analyze_bgr(self, image_bgr: np.ndarray) -> MouthResult:
         ok = self._ensure()
         if not ok or self._face_mesh is None:
+            print("[MouthDetector] mediapipe not available")
             return MouthResult(mouth="not_available", confidence=0.0)
 
         h, w = image_bgr.shape[:2]
@@ -52,15 +54,24 @@ class MouthDetector:
 
         image_rgb = image_bgr[:, :, ::-1]
         res = self._face_mesh.process(image_rgb)
-        if not res.multi_face_landmarks:
+        if not res or not res.multi_face_landmarks:
+            print("[MouthDetector] No face detected")
             return MouthResult(mouth="not_visible", confidence=0.0)
 
+        print(f"[MouthDetector] Detected {len(res.multi_face_landmarks)} face(s)")
         lm = res.multi_face_landmarks[0].landmark
 
         upper = lm[13]
         lower = lm[14]
         left = lm[61]
         right = lm[291]
+
+        landmarks = {
+            "upper": {"x": upper.x, "y": upper.y},
+            "lower": {"x": lower.x, "y": lower.y},
+            "left": {"x": left.x, "y": left.y},
+            "right": {"x": right.x, "y": right.y},
+        }
 
         open_dist = float(((upper.x - lower.x) ** 2 + (upper.y - lower.y) ** 2) ** 0.5)
         width_dist = float(((left.x - right.x) ** 2 + (left.y - right.y) ** 2) ** 0.5)
@@ -70,10 +81,10 @@ class MouthDetector:
 
         if ratio > threshold:
             conf = min(1.0, max(0.0, (ratio - threshold) / 0.08))
-            return MouthResult(mouth="open", confidence=round(conf, 3))
+            return MouthResult(mouth="open", confidence=round(conf, 3), landmarks=landmarks)
 
         conf = min(1.0, max(0.0, 1.0 - (ratio / threshold)))
-        return MouthResult(mouth="closed", confidence=round(conf, 3))
+        return MouthResult(mouth="closed", confidence=round(conf, 3), landmarks=landmarks)
 
 
 _detector = MouthDetector()
@@ -107,5 +118,5 @@ def mouth_status() -> tuple[dict[str, Any], int]:
         return {"mouth": "not_available", "confidence": 0.0}, 200
 
     r = _detector.analyze_bgr(img)
-    return {"mouth": r.mouth, "confidence": r.confidence}, 200
+    return {"mouth": r.mouth, "confidence": r.confidence, "landmarks": r.landmarks}, 200
 

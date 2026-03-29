@@ -31,7 +31,7 @@
         
         <div class="cardActions">
           <a class="btnPrimary" href="{{ v['url'] }}" target="_blank" rel="noreferrer">Watch on YouTube</a>
-          <a class="btnGhost" href="{{ url_for('video_test', video_id=v['id']) }}">Take test</a>
+          <a class="btnGhost" href="{{ url_for('video_test', video_id=v['id'], phrase=v['sample_phrase']) }}">Take test</a>
           <a class="btnGhost" href="{{ url_for('practice') }}">Practice</a>
         </div>
       </section>

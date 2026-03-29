@@ -17,6 +17,11 @@ from flask import Flask, Response, flash, g, redirect, render_template, request,
 from authlib.integrations.flask_client import OAuth
 from openai import OpenAI
 from werkzeug.utils import secure_filename
+import subprocess
+import whisper
+
+from modules.mouth_detection import mouth_bp
+from modules.phoneme_scoring import scorer
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +42,21 @@ LANGUAGES = [
     {"id": "de-DE", "label": "German"},
     {"id": "es-ES", "label": "Spanish"},
 ]
+
+
+def _get_youtube_embed_url(url: str) -> str:
+    if not ("youtube.com" in url or "youtu.be" in url):
+        return ""
+    if "list=" in url:
+        pid = url.split("list=")[-1].split("&")[0]
+        return f"https://www.youtube.com/embed/videoseries?list={pid}"
+    if "watch?v=" in url:
+        vid = url.split("watch?v=")[-1].split("&")[0]
+        return f"https://www.youtube.com/embed/{vid}"
+    if "youtu.be/" in url:
+        vid = url.split("youtu.be/")[-1].split("?")[0]
+        return f"https://www.youtube.com/embed/{vid}"
+    return ""
 
 
 def _lang_to_whisper_code(language_id: str) -> str:
@@ -115,37 +135,108 @@ def pseudo_phonemes(text: str, language_id: str) -> list[str]:
     return [p for p in phonemes if p and p != " "]
 
 
-def compare_words(expected: str, actual: str) -> list[dict]:
+def compare_words(expected: str, actual: str, whisper_words: list[dict], confidence_proxy: float) -> list[dict]:
     e = _tokenize_words(expected)
     a = _tokenize_words(actual)
     max_len = max(len(e), len(a))
     out = []
+    
+    # Map whisper_words to segments for better matching
+    # whisper_words: list of dicts {"word": "...", "start": 0, "end": 1, "probability": 0.9}
+    
     for i in range(max_len):
         ew = e[i] if i < len(e) else ""
         aw = a[i] if i < len(a) else ""
-        out.append({"expected": ew, "actual": aw, "ok": bool(ew and ew == aw)})
+        
+        # Determine status
+        # ok=True (Green), ok=False (Red), weak=True (Yellow)
+        status = {"expected": ew, "actual": aw, "ok": False, "weak": False}
+        
+        if ew and ew == aw:
+            # Text matched. Now check confidence.
+            # Find corresponding whisper word data
+            # Use index as simple matching (usually Whisper is in sync with tokens)
+            word_conf = 1.0
+            if i < len(whisper_words):
+                word_conf = whisper_words[i].get("probability", 1.0)
+            
+            # Combine word-level and segment-level confidence
+            final_conf = word_conf * confidence_proxy
+            
+            if final_conf < 0.55: # Stricter: Low confidence -> Mispronounced
+                status["ok"] = False
+                status["weak"] = False
+            elif final_conf < 0.80: # Stricter: Moderate confidence -> Weak
+                status["ok"] = True
+                status["weak"] = True
+            else:
+                status["ok"] = True
+                status["weak"] = False
+        else:
+            # Text didn't match
+            status["ok"] = False
+            status["weak"] = False
+            
+        out.append(status)
     return out
 
 
-def score_from_words(expected: str, actual: str) -> tuple[float, float]:
+def score_from_words(expected: str, actual: str, word_rows: list[dict]) -> tuple[float, float]:
     e = _tokenize_words(expected)
     a = _tokenize_words(actual)
     if not e and not a:
         return 0.0, 0.0
+    
     max_len = max(len(e), len(a), 1)
-    correct_pos = sum(1 for i in range(min(len(e), len(a))) if e[i] == a[i])
-    accuracy = (correct_pos / max_len) * 100.0
+    
+    # Accuracy score based on word-level pronunciation quality
+    # Perfect word = 1.0, Weak word = 0.5, Incorrect word = 0.0
+    quality_sum = 0.0
+    for w in word_rows:
+        if w["ok"] and not w["weak"]:
+            quality_sum += 1.0
+        elif w["weak"]:
+            quality_sum += 0.5
+        else:
+            quality_sum += 0.0
+            
+    accuracy = (quality_sum / max_len) * 100.0
     fluency = min(100.0, (len(a) / max(1, len(e))) * 100.0)
     return round(accuracy, 2), round(fluency, 2)
 
 
-def score_total(accuracy: float, fluency: float, expected_ph: list[str], actual_ph: list[str]) -> float:
-    max_len = max(len(expected_ph), len(actual_ph), 1)
+def score_total(accuracy: float, fluency: float, expected_ph: list[str], actual_ph: list[str], whisper_words: list[dict], confidence_proxy: float) -> dict:
+    # Phoneme score (20%)
+    max_ph = max(len(expected_ph), len(actual_ph), 1)
     mismatches = sum(1 for i in range(min(len(expected_ph), len(actual_ph))) if expected_ph[i] != actual_ph[i])
     mismatches += abs(len(expected_ph) - len(actual_ph))
-    phoneme_score = max(0.0, 1.0 - (mismatches / max_len)) * 100.0
-    total = 0.55 * accuracy + 0.2 * fluency + 0.25 * phoneme_score
-    return round(max(0.0, min(100.0, total)), 2)
+    phoneme_score = max(0.0, 1.0 - (mismatches / max_ph)) * 100.0
+
+    # Rhythm Score (based on word timing regularity and pauses)
+    pause_penalty = 0.0
+    timing_variance = 0.0
+    if len(whisper_words) > 1:
+        gaps = []
+        for i in range(len(whisper_words) - 1):
+            gap = whisper_words[i+1]["start"] - whisper_words[i]["end"]
+            gaps.append(gap)
+            if gap > 0.6: 
+                pause_penalty += 8.0
+        
+        if gaps:
+            timing_variance = float(np.var(gaps))
+    
+    rhythm_score = max(0.0, 100.0 - pause_penalty - (timing_variance * 50))
+
+    # Overall Total
+    total = (0.45 * accuracy) + (0.20 * phoneme_score) + (0.20 * fluency) + (0.15 * rhythm_score)
+    
+    return {
+        "overall": round(max(0.0, min(100.0, total)), 2),
+        "phoneme": round(phoneme_score, 2),
+        "fluency": round(fluency, 2),
+        "rhythm": round(rhythm_score, 2)
+    }
 
 
 def build_phoneme_feedback(language_id: str, expected_ph: list[str], actual_ph: list[str]) -> dict:
@@ -171,26 +262,89 @@ def build_phoneme_feedback(language_id: str, expected_ph: list[str], actual_ph: 
     return {"missing": missing, "tips": tips}
 
 
-def transcribe_audio(audio_path: str, language_id: str) -> tuple[str, bool]:
+def transcribe_audio(audio_path: str, language_id: str) -> dict:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        return "", True
+        return {"text": "", "demo": True, "words": []}
 
     try:
         client = OpenAI(api_key=api_key)
         with open(audio_path, "rb") as f:
-            result = client.audio.transcriptions.create(
+            # Using verbose_json to get word-level timestamps and confidence
+            response = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=f,
                 language=_lang_to_whisper_code(language_id),
-                response_format="text",
+                response_format="verbose_json",
+                timestamp_granularities=["word"]
             )
-        if isinstance(result, str):
-            return result.strip(), False
-        return str(result).strip(), False
+        
+        text = getattr(response, "text", "").strip()
+        words = getattr(response, "words", [])
+        
+        # avg_logprob is a proxy for transcription confidence
+        # It's usually a negative value; higher (closer to 0) is better.
+        avg_logprob = getattr(response, "avg_logprob", -1.0)
+        # Convert to 0-1 scale (roughly)
+        confidence_proxy = min(1.0, max(0.0, (avg_logprob + 3.0) / 3.0))
+
+        # Convert words objects to dictionaries for JSON serialization
+        formatted_words = []
+        for w in words:
+            # Check if probability is available (Whisper API sometimes provides it in tokens/logprobs)
+            # but in verbose_json it's not always per word. We'll capture it if it is.
+            prob = getattr(w, "probability", 1.0) # Default to 1.0 if not found
+            
+            formatted_words.append({
+                "word": w.word,
+                "start": w.start,
+                "end": w.end,
+                "probability": prob
+            })
+            
+        return {
+            "text": text, 
+            "demo": False, 
+            "words": formatted_words,
+            "confidence_proxy": confidence_proxy
+        }
     except Exception:
         logger.exception("transcribe_audio failed")
-        return "", True
+        return {"text": "", "demo": True, "words": []}
+
+
+def get_ai_feedback(expected: str, transcript: str, accuracy: float, fluency: float, pause_score: float, confidence_score: float) -> str:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return "Great effort! Focus on matching the expected sentence more closely."
+
+    try:
+        client = OpenAI(api_key=api_key)
+        prompt = f"""
+        You are a professional pronunciation coach. 
+        User tried to say: "{expected}"
+        Actually said: "{transcript}"
+        Accuracy: {accuracy}% (matching words)
+        Fluency: {fluency}% (pacing/completion)
+        Pause Score: {pause_score}% (100 is no awkward pauses)
+        Confidence/Clarity: {confidence_score}%
+
+        Provide 2-3 specific sentences of feedback. 
+        - If the pause score is low, mention specific gaps. 
+        - Mention any mispronounced phonemes or words. 
+        - Comment on their likely intonation or pitch based on the transcript match.
+        - Be honest: if it was poor, say why so they can improve.
+        - Do not give generic praise if the scores are low.
+        """
+        result = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "system", "content": "You are a friendly but firm pronunciation coach."},
+                      {"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        return (result.choices[0].message.content or "").strip()
+    except Exception:
+        return "Good job! Keep practicing to improve your clarity and pace."
 
 
 def smtp_configured() -> bool:
@@ -278,6 +432,7 @@ def send_login_alert_email(to_email: str) -> bool:
 
 def create_app() -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
+    app.register_blueprint(mouth_bp)
     app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me")
     app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -445,6 +600,16 @@ def create_app() -> Flask:
             )
             db.execute(
                 """
+                CREATE TABLE IF NOT EXISTS video_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    url TEXT UNIQUE NOT NULL,
+                    sentences TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            db.execute(
+                """
                 CREATE TABLE IF NOT EXISTS sentences (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     language TEXT NOT NULL,
@@ -458,7 +623,8 @@ def create_app() -> Flask:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     language TEXT NOT NULL,
                     title TEXT NOT NULL,
-                    url TEXT NOT NULL
+                    url TEXT NOT NULL,
+                    sample_phrase TEXT
                 )
                 """
             )
@@ -494,6 +660,7 @@ def create_app() -> Flask:
                 if column not in cols:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
 
+            add_column_if_missing("learning_videos", "sample_phrase", "TEXT")
             add_column_if_missing("users", "is_email_verified", "INTEGER NOT NULL DEFAULT 0")
             add_column_if_missing("users", "email_verified_at", "TEXT")
             add_column_if_missing("practice_sessions", "language", "TEXT")
@@ -512,29 +679,43 @@ def create_app() -> Flask:
                 ]
                 db.executemany("INSERT INTO sentences (language, text) VALUES (?, ?)", seed)
 
+            if db.execute("SELECT COUNT(*) FROM learning_videos WHERE language = 'en-US' AND sample_phrase IS NULL").fetchone()[0] > 0:
+                # Update existing US English levels with phrases
+                phrases = {
+                    "Level 1 - US Pronunciation": "Thank you for your time. I look forward to working with you.",
+                    "Level 2 - US Pronunciation": "Could you please confirm the meeting schedule for next week?",
+                    "Level 3 - US Pronunciation": "Proper pronunciation prevents poor performance in professional settings.",
+                    "Level 4 - US Pronunciation": "The innovative technology simplifies the complex manufacturing process.",
+                    "Level 5 - US Pronunciation": "Extraordinary achievements require consistent effort and unwavering dedication.",
+                    "Level 6 - US Pronunciation": "Understanding subtle nuances in intonation helps master the American accent."
+                }
+                for title, phrase in phrases.items():
+                    db.execute("UPDATE learning_videos SET sample_phrase = ? WHERE title = ?", (phrase, title))
+                db.commit()
+
             if db.execute("SELECT COUNT(*) FROM learning_videos WHERE language = 'en-US' AND title LIKE 'Level %'").fetchone()[0] == 0:
                 # Remove default en-US video if it exists
                 db.execute("DELETE FROM learning_videos WHERE language = 'en-US' AND title = 'English TH sound (guide)'")
                 
                 vids = [
-                    ("en-US", "Level 1 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDfhVMerPPR2YqOP1XOeBTm&si=4BBfFAn2IFKAoRPy"),
-                    ("en-US", "Level 2 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDf5Wc_Y5JZS17taUi2WWgx&si=CddChK4ALcBpMA7L"),
-                    ("en-US", "Level 3 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDimnOyDv32VnEVFqhAItAy&si=v3ZpJ8iAhMcsYCOg"),
-                    ("en-US", "Level 4 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDJkl2T7xAews-GoJMc4I7j&si=TNLKk8PBKSQTIzqi"),
-                    ("en-US", "Level 5 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgBACqEFo5TuhJWAReRNNTc8&si=o0TIHA4sIQVU_xQi"),
-                    ("en-US", "Level 6 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgAutnWOSAh2AH026L9w8c18&si=NQgnwgFjUxK8hfqe"),
+                    ("en-US", "Level 1 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDfhVMerPPR2YqOP1XOeBTm&si=4BBfFAn2IFKAoRPy", "Thank you for your time. I look forward to working with you."),
+                    ("en-US", "Level 2 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDf5Wc_Y5JZS17taUi2WWgx&si=CddChK4ALcBpMA7L", "Could you please confirm the meeting schedule for next week?"),
+                    ("en-US", "Level 3 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDimnOyDv32VnEVFqhAItAy&si=v3ZpJ8iAhMcsYCOg", "Proper pronunciation prevents poor performance in professional settings."),
+                    ("en-US", "Level 4 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDJkl2T7xAews-GoJMc4I7j&si=TNLKk8PBKSQTIzqi", "The innovative technology simplifies the complex manufacturing process."),
+                    ("en-US", "Level 5 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgBACqEFo5TuhJWAReRNNTc8&si=o0TIHA4sIQVU_xQi", "Extraordinary achievements require consistent effort and unwavering dedication."),
+                    ("en-US", "Level 6 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgAutnWOSAh2AH026L9w8c18&si=NQgnwgFjUxK8hfqe", "Understanding subtle nuances in intonation helps master the American accent."),
                 ]
-                db.executemany("INSERT INTO learning_videos (language, title, url) VALUES (?, ?, ?)", vids)
+                db.executemany("INSERT INTO learning_videos (language, title, url, sample_phrase) VALUES (?, ?, ?, ?)", vids)
                 db.commit()
 
             if db.execute("SELECT COUNT(*) FROM learning_videos").fetchone()[0] == 0:
                 vids = [
-                    ("en-GB", "British English pronunciation basics", "https://www.youtube.com/watch?v=9kQimR4D_s0"),
-                    ("ja-JP", "Japanese pronunciation tips", "https://www.youtube.com/watch?v=7Yl1WnO_KtQ"),
-                    ("de-DE", "German CH sound explained", "https://www.youtube.com/watch?v=Y1lJxgJ5p0c"),
-                    ("es-ES", "Spanish rolled R practice", "https://www.youtube.com/watch?v=3wqO7dLrPQQ"),
+                    ("en-GB", "British English pronunciation basics", "https://www.youtube.com/watch?v=9kQimR4D_s0", "Please fetch the water from the kitchen."),
+                    ("ja-JP", "Japanese pronunciation tips", "https://www.youtube.com/watch?v=7Yl1WnO_KtQ", "はじめまして。どうぞよろしくお願いします。"),
+                    ("de-DE", "German CH sound explained", "https://www.youtube.com/watch?v=Y1lJxgJ5p0c", "Vielen Dank. Ich freue mich auf die Zusammenarbeit."),
+                    ("es-ES", "Spanish rolled R practice", "https://www.youtube.com/watch?v=3wqO7dLrPQQ", "Muchas gracias. Espero trabajar contigo pronto."),
                 ]
-                db.executemany("INSERT INTO learning_videos (language, title, url) VALUES (?, ?, ?)", vids)
+                db.executemany("INSERT INTO learning_videos (language, title, url, sample_phrase) VALUES (?, ?, ?, ?)", vids)
                 db.commit()
 
     init_db()
@@ -1036,10 +1217,21 @@ def create_app() -> Flask:
 
         profile_row = get_profile(user_id)
         language_id = profile_row["selected_language"]
-        sentence = g.db.execute(
-            "SELECT id, text FROM sentences WHERE language = ? ORDER BY RANDOM() LIMIT 1",
+        
+        # Pick a random sample phrase from learning_videos for the selected language
+        row = g.db.execute(
+            "SELECT sample_phrase FROM learning_videos WHERE language = ? AND sample_phrase IS NOT NULL ORDER BY RANDOM() LIMIT 1",
             (language_id,),
         ).fetchone()
+        
+        # Fallback to sentences table if no video-based phrases found
+        if not row:
+            row = g.db.execute(
+                "SELECT text as sample_phrase FROM sentences WHERE language = ? ORDER BY RANDOM() LIMIT 1",
+                (language_id,),
+            ).fetchone()
+            
+        sentence = {"text": row["sample_phrase"]} if row else {"text": "Welcome to ConverseAI. Let's practice!"}
         user = get_user(user_id)
         return render_template("practice.html", user=user, profile=profile_row, language_id=language_id, sentence=sentence)
 
@@ -1088,27 +1280,55 @@ def create_app() -> Flask:
                 audio_filename = f"{uuid.uuid4().hex}.webm"
                 audio_path = os.path.join(UPLOAD_DIR, audio_filename)
                 audio.save(audio_path)
-                transcript, demo = transcribe_audio(audio_path, language_id)
+                
+                # 0. Advanced Phoneme-Level Scoring (torchaudio + wav2vec2)
+                adv_result = scorer.get_phoneme_scores(audio_path, expected_text, language_id)
+                adv_score = adv_result["final_score"]
+                word_feedback = adv_result["word_feedback"]
+                
+                result = transcribe_audio(audio_path, language_id)
+                transcript = result["text"]
+                demo = result["demo"]
+                whisper_words = result["words"]
+                confidence_proxy = result.get("confidence_proxy", 0.5)
                 if demo:
                     transcript = expected_text
-            accuracy, fluency = score_from_words(expected_text, transcript)
+            
+            # 1. Compare words first to get pronunciation quality flags
+            word_rows = compare_words(expected_text, transcript, whisper_words, confidence_proxy)
+            
+            # 2. Calculate accuracy and fluency based on those flags
+            accuracy, fluency = score_from_words(expected_text, transcript, word_rows)
+            
+            # Adjust accuracy to favor the advanced phoneme score if available
+            if not demo:
+                # adv_score is 0-10, accuracy is 0-100
+                accuracy = (accuracy * 0.4) + (adv_score * 10 * 0.6)
+            
             expected_ph = pseudo_phonemes(expected_text, language_id)
             actual_ph = pseudo_phonemes(transcript, language_id)
-            total = score_total(accuracy, fluency, expected_ph, actual_ph)
+            
+            # 3. Detailed Scoring
+            scores = score_total(accuracy, fluency, expected_ph, actual_ph, whisper_words, confidence_proxy)
+            total = scores["overall"]
 
+            ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"])
 
-
-            word_rows = compare_words(expected_text, transcript)
             phoneme_fb = build_phoneme_feedback(language_id, expected_ph, actual_ph)
             feedback = {
                 "demo_stt": demo,
                 "accuracy": accuracy,
-                "fluency": fluency,
-                "confidence": round(min(0.99, max(0.2, float(total) / 100.0)), 2),
+                "fluency": scores["fluency"],
+                "rhythm_score": scores["rhythm"],
+                "phoneme_score": scores["phoneme"],
+                "confidence": round(total / 100.0, 2), # Used for the ring display
+                "ai_feedback": ai_text,
                 "phonemes_expected": expected_ph[:120],
                 "phonemes_actual": actual_ph[:120],
                 "word_rows": word_rows[:80],
                 "phoneme_feedback": phoneme_fb,
+                "whisper_words": whisper_words,
+                "advanced_feedback": word_feedback if not demo else [],
             }
 
             points_earned = 10
@@ -1187,7 +1407,9 @@ def create_app() -> Flask:
             if demo_mode():
                 user_text = "How are you?"
             else:
-                user_text, demo = transcribe_audio(audio_path, language_id)
+                result = transcribe_audio(audio_path, language_id)
+                user_text = result["text"]
+                demo = result["demo"]
                 if demo or not user_text:
                     user_text = "How are you?"
         except Exception:
@@ -1381,13 +1603,7 @@ def create_app() -> Flask:
             url = ""
 
         is_youtube = "youtube.com" in url or "youtu.be" in url
-        embed_url = url
-        if "youtu.be/" in url:
-            vid = url.split("youtu.be/")[-1].split("?")[0]
-            embed_url = f"https://www.youtube.com/embed/{vid}"
-        if "watch?v=" in url:
-            vid = url.split("watch?v=")[-1].split("&")[0]
-            embed_url = f"https://www.youtube.com/embed/{vid}"
+        embed_url = _get_youtube_embed_url(url) or url
 
         return render_template(
             "video_test.html",
@@ -1400,6 +1616,89 @@ def create_app() -> Flask:
             expected_phrase=expected_phrase,
             demo=demo_mode(),
         )
+
+    @app.post("/api/sentences")
+    @login_required
+    def api_sentences():
+        data = request.get_json()
+        video_url = data.get("video_url")
+        if not video_url:
+            return {"error": "video_url required"}, 400
+
+        # Check cache
+        existing = g.db.execute("SELECT sentences FROM video_cache WHERE url = ?", (video_url,)).fetchone()
+        if existing:
+            return {"sentences": json.loads(existing["sentences"])}
+
+        # Process video (ffmpeg + whisper)
+        temp_audio = os.path.join(UPLOAD_DIR, f"temp_{uuid.uuid4().hex}.wav")
+        try:
+            # Step 1: Extract audio
+            subprocess.run([
+                "ffmpeg", "-i", video_url,
+                "-vn", "-acodec", "pcm_s16le",
+                "-ar", "16000", "-ac", "1", temp_audio
+            ], check=True, capture_output=True)
+
+            # Step 2: Transcribe with Whisper
+            model = whisper.load_model("base")
+            result = model.transcribe(temp_audio)
+            transcript = result["text"]
+
+            # Step 3: Select sentences with AI
+            client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            prompt = f"""
+            You are a pronunciation coach for a language learning app.
+            Given a video transcript, select or rewrite exactly 5 sentences that:
+            1. Are natural, complete sentences (8–14 words each)
+            2. Cover a variety of phoneme patterns from the transcript
+            3. Are ordered easy → hard in pronunciation difficulty
+            4. Match the accent and topic of the video
+            Respond ONLY with a valid JSON array of 5 strings. No extra text.
+            
+            Transcript: {transcript[:4000]}
+            """
+            
+            ai_res = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            sentences_json = json.loads(ai_res.choices[0].message.content)
+            sentences = sentences_json.get("sentences", [])
+            if not sentences and isinstance(sentences_json, list):
+                sentences = sentences_json
+            
+            if not sentences or len(sentences) < 5:
+                # Fallback if AI fails
+                sentences = [
+                    "This is a great day to practice English.",
+                    "The weather is absolutely wonderful for a walk.",
+                    "Could you please repeat that more slowly?",
+                    "Understanding native speakers takes consistent daily practice.",
+                    "Communication is about more than just matching words perfectly."
+                ]
+
+            # Cache in DB
+            now = datetime.utcnow().isoformat()
+            g.db.execute("INSERT INTO video_cache (url, sentences, created_at) VALUES (?, ?, ?)", 
+                         (video_url, json.dumps(sentences), now))
+            g.db.commit()
+
+            return {"sentences": sentences}
+        except Exception as e:
+            logger.exception("api_sentences failed")
+            # Fallback sentences
+            return {"sentences": [
+                "Practice makes progress when learning a new language.",
+                "Listen closely to the native pronunciation patterns.",
+                "Try to match the rhythm and intonation of the speaker.",
+                "Repeat each sentence multiple times until it feels natural.",
+                "Consistency is the key to mastering any difficult accent."
+            ]}
+        finally:
+            if os.path.exists(temp_audio):
+                os.remove(temp_audio)
 
     @app.post("/video-test/analyze")
     @login_required
@@ -1455,7 +1754,9 @@ def create_app() -> Flask:
             profile_row = get_profile(user_id) if user_id else None
             language_id = (profile_row["selected_language"] or "en-US") if profile_row else "en-US"
 
-            transcript, demo = transcribe_audio(audio_path, language_id)
+            result = transcribe_audio(audio_path, language_id)
+            transcript = result["text"]
+            demo = result["demo"]
             if demo or not transcript:
                 return {
                     "score": 9,
@@ -1550,7 +1851,7 @@ def create_app() -> Flask:
         profile_row = get_profile(user_id)
         language_id = profile_row["selected_language"]
         rows = g.db.execute(
-            "SELECT id, title, url FROM learning_videos WHERE language = ? ORDER BY id ASC",
+            "SELECT id, title, url, sample_phrase FROM learning_videos WHERE language = ? ORDER BY id ASC",
             (language_id,),
         ).fetchall()
         
@@ -1558,25 +1859,55 @@ def create_app() -> Flask:
         for r in rows:
             v = dict(r)
             url = v["url"]
-            v["is_youtube"] = "youtube.com" in url or "youtu.be" in url
-            v["embed_url"] = ""
-            if v["is_youtube"]:
-                if "list=" in url:
-                    # Playlist
-                    pid = url.split("list=")[-1].split("&")[0]
-                    v["embed_url"] = f"https://www.youtube.com/embed/videoseries?list={pid}"
-                elif "watch?v=" in url:
-                    # Single video
-                    vid = url.split("watch?v=")[-1].split("&")[0]
-                    v["embed_url"] = f"https://www.youtube.com/embed/{vid}"
-                elif "youtu.be/" in url:
-                    # Short link
-                    vid = url.split("youtu.be/")[-1].split("?")[0]
-                    v["embed_url"] = f"https://www.youtube.com/embed/{vid}"
+            v["embed_url"] = _get_youtube_embed_url(url)
+            v["is_youtube"] = bool(v["embed_url"])
             videos.append(v)
             
         user = get_user(user_id)
         return render_template("learn.html", user=user, profile=profile_row, language_id=language_id, videos=videos)
+
+    @app.post("/video-test/analyze")
+    @login_required
+    def video_test_analyze():
+        user_id = int(session["user_id"])
+        audio = request.files.get("audio")
+        expected_text = request.form.get("expected", "").strip()
+        
+        if not audio or not expected_text:
+            return {"error": "audio and expected text required"}, 400
+
+        audio_filename = f"{uuid.uuid4().hex}.webm"
+        audio_path = os.path.join(UPLOAD_DIR, audio_filename)
+        audio.save(audio_path)
+        
+        profile_row = get_profile(user_id)
+        language_id = profile_row["selected_language"] if profile_row else "en-US"
+
+        # Advanced Scoring
+        adv_result = scorer.get_phoneme_scores(audio_path, expected_text, language_id)
+        
+        result = transcribe_audio(audio_path, language_id)
+        transcript = result["text"]
+        whisper_words = result["words"]
+        confidence_proxy = result.get("confidence_proxy", 0.5)
+
+        word_rows = compare_words(expected_text, transcript, whisper_words, confidence_proxy)
+        accuracy, fluency = score_from_words(expected_text, transcript, word_rows)
+        
+        expected_ph = pseudo_phonemes(expected_text, language_id)
+        actual_ph = pseudo_phonemes(transcript, language_id)
+        
+        scores = score_total(accuracy, fluency, expected_ph, actual_ph, whisper_words, confidence_proxy)
+        
+        ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"])
+
+        return {
+            "score": round(scores["overall"] / 10, 1),
+            "confidence": round(scores["overall"], 0),
+            "feedback": [ai_text],
+            "transcript": transcript,
+            "scores": scores
+        }
 
     @app.get("/history")
     @login_required

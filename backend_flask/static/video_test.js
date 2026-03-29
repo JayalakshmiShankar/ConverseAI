@@ -1,316 +1,295 @@
 (() => {
   const takeBtn = document.getElementById("takeTestBtn");
   const stopBtn = document.getElementById("stopTestBtn");
-  const againBtn = document.getElementById("takeAgainBtn");
-  const status = document.getElementById("testStatus");
-  const statusText = document.getElementById("statusText");
-  const testMic = document.getElementById("testMic");
-  const testWave = document.getElementById("testWave");
-  const resultCard = document.getElementById("resultCard");
-  const improveList = document.getElementById("improveList");
-  const scoreVal = document.getElementById("scoreVal");
-  const confVal = document.getElementById("confVal");
-  const scoreBadge = document.getElementById("scoreBadge");
-  const errorBox = document.getElementById("testError");
+  const nextBtn = document.getElementById("nextSentenceBtn");
+  const quizSection = document.getElementById("quizSection");
+  const videoSection = document.getElementById("videoSection");
+  const lessonVideo = document.getElementById("lessonVideo");
+  const quizProgress = document.getElementById("quizProgress");
+  const targetSentenceText = document.getElementById("targetSentenceText");
   const expectedEl = document.getElementById("expectedText");
-  const spinner = document.getElementById("testSpinner");
+  const quizResult = document.getElementById("quizResult");
+  const statusText = document.getElementById("statusText");
+  const status = document.getElementById("testStatus");
+  const waveformCanvas = document.getElementById("waveform");
+  const waveformContainer = document.getElementById("waveformContainer");
+  const silenceWarning = document.getElementById("silenceWarning");
+  const wordChips = document.getElementById("wordChips");
+  const aiFeedbackText = document.getElementById("aiFeedbackText");
+  const finalSummary = document.getElementById("finalSummary");
+  const totalSessionScore = document.getElementById("totalSessionScore");
 
-  const DEMO_MODE = Boolean(window.__DEMO_MODE__);
-  const debug = () => {};
+  // Score display elements
+  const overallScoreVal = document.getElementById("overallScoreVal");
+  const overallFill = document.getElementById("overallFill");
+  const phonemeScoreVal = document.getElementById("phonemeScoreVal");
+  const phonemeFill = document.getElementById("phonemeFill");
+  const fluencyScoreVal = document.getElementById("fluencyScoreVal");
+  const fluencyFill = document.getElementById("fluencyFill");
+  const rhythmScoreVal = document.getElementById("rhythmScoreVal");
+  const rhythmFill = document.getElementById("rhythmFill");
 
-  let recording = false;
-  let loading = false;
-  let timers = [];
-
-  const feedbackSets = [
-    ["Good clarity", "Improve 'th' sound", "Better pacing needed"],
-    ["Nice pronunciation", "Keep your mouth relaxed", "Stress key words clearly"],
-    ["Great effort", "Slow down slightly", "Crisp consonants help confidence"],
-  ];
-
+  let sentences = [];
+  let currentIdx = 0;
+  let sessionScores = [];
   let recorder = null;
   let chunks = [];
   let micStream = null;
+  let audioCtx = null;
+  let analyser = null;
+  let dataArray = null;
+  let animationId = null;
+  let lastAudioTime = Date.now();
+  let wordCount = 0;
+  let recording = false;
 
-  function analyzeSpeech(expected, spoken) {
-    const exp = expected.toLowerCase().split(" ");
-    const usr = spoken.toLowerCase().split(" ");
+  const DEMO_MODE = Boolean(window.__DEMO_MODE__);
+  const VIDEO_URL = window.__VIDEO_URL__;
 
-    let mistakes = [];
-    let correct = 0;
+  // 1. Detect Video Completion
+  function initVideoDetection() {
+    if (!lessonVideo) return;
 
-    exp.forEach((word, i) => {
-      if (!usr[i]) {
-        mistakes.push({ word, type: "Skipped" });
-      } else if (usr[i] !== word) {
-        mistakes.push({ word, said: usr[i], type: "Incorrect" });
-      } else {
-        correct++;
-      }
-    });
-
-    const score = Math.round((correct / exp.length) * 10);
-
-    return { score, mistakes };
-  }
-
-  function getExpectedPhrase() {
-    const expected = String(expectedEl?.dataset?.expected || "").trim();
-    return expected || "the quick brown fox jumps over the lazy dog";
-  }
-
-  function reset() {
-    timers.forEach((t) => clearTimeout(t));
-    timers = [];
-    recording = false;
-    loading = false;
-    if (status) {
-      status.classList.add("testStatusHidden");
-      status.setAttribute("aria-hidden", "true");
-    }
-    if (resultCard) {
-      resultCard.classList.add("resultCardHidden");
-      resultCard.setAttribute("aria-hidden", "true");
-      resultCard.classList.remove("fadeIn");
-    }
-    if (againBtn) againBtn.hidden = true;
-    if (stopBtn) stopBtn.hidden = true;
-    if (stopBtn) {
-      stopBtn.disabled = false;
-      stopBtn.textContent = "Stop";
-    }
-    if (takeBtn) takeBtn.disabled = false;
-    if (scoreVal) scoreVal.textContent = "0";
-    if (confVal) confVal.textContent = "0";
-    if (improveList) improveList.innerHTML = "";
-    if (errorBox) {
-      errorBox.classList.add("testErrorHidden");
-      errorBox.setAttribute("aria-hidden", "true");
-    }
-    if (testMic) testMic.classList.remove("micActive");
-    if (testWave) testWave.classList.remove("waveActive");
-    if (spinner) spinner.hidden = true;
-    chunks = [];
-    recorder = null;
-    if (micStream) micStream.getTracks().forEach((t) => t.stop());
-    micStream = null;
-  }
-
-  function showStatus(text) {
-    if (!statusText) return;
-    statusText.textContent = text;
-  }
-
-  function applyBadge(score) {
-    if (!scoreBadge) return;
-    scoreBadge.classList.remove("scoreBadgeGreen", "scoreBadgeYellow", "scoreBadgeRed");
-    const score100 = Math.round((score / 10) * 100);
-    if (score100 >= 80) scoreBadge.classList.add("scoreBadgeGreen");
-    else if (score100 >= 60) scoreBadge.classList.add("scoreBadgeYellow");
-    else scoreBadge.classList.add("scoreBadgeRed");
-  }
-
-  function setResult(data) {
-    const score = Number(data?.score ?? 9);
-    const confidence = Number(data?.confidence ?? 80);
-    let feedback =
-      Array.isArray(data?.feedback) && data.feedback.length
-        ? data.feedback
-        : [];
-    if (!feedback.length && data?.transcript) {
-      const expected = getExpectedPhrase();
-      const res = analyzeSpeech(expected, String(data.transcript || ""));
-      if (Array.isArray(res?.mistakes) && res.mistakes.length) {
-        feedback = res.mistakes.slice(0, 3).map((m) => {
-          if (m.type === "Skipped") return `Skipped: '${m.word}'`;
-          return `Expected '${m.word}', you said '${m.said}'`;
+    // Handle HTML5 Video
+    if (lessonVideo.tagName === 'VIDEO') {
+      lessonVideo.addEventListener('ended', onVideoEnd);
+    } 
+    // Handle YouTube (using API if available)
+    else if (lessonVideo.tagName === 'IFRAME') {
+      // The script in template handles YT API loading
+      window.onYouTubeIframeAPIReady = () => {
+        new YT.Player('lessonVideo', {
+          events: {
+            'onStateChange': (event) => {
+              if (event.data === YT.PlayerState.ENDED) onVideoEnd();
+            }
+          }
         });
-      }
+      };
     }
-    if (!feedback.length) feedback = feedbackSets[Math.floor(Math.random() * feedbackSets.length)];
-    if (improveList) {
-      improveList.innerHTML = "";
-      feedback.forEach((f) => {
-        const li = document.createElement("li");
-        li.textContent = f;
-        improveList.appendChild(li);
-      });
-    }
-
-    if (resultCard) {
-      resultCard.classList.remove("resultCardHidden");
-      resultCard.setAttribute("aria-hidden", "false");
-      resultCard.classList.remove("fadeIn");
-      void resultCard.offsetWidth;
-      resultCard.classList.add("fadeIn");
-    }
-    if (againBtn) againBtn.hidden = false;
-    applyBadge(score);
-    const start = performance.now();
-    const duration = 900;
-    function tick(now) {
-      const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
-      const current = Math.max(0, Math.round(score * eased));
-      if (scoreVal) scoreVal.textContent = String(current);
-      const currentConf = Math.max(0, Math.round(confidence * eased));
-      if (confVal) confVal.textContent = String(currentConf);
-      if (t < 1) requestAnimationFrame(tick);
-    }
-    requestAnimationFrame(tick);
   }
 
-  function showError(msg) {
-    if (errorBox) {
-      errorBox.textContent = msg || "Analysis unavailable, try again";
-      errorBox.classList.remove("testErrorHidden");
-      errorBox.setAttribute("aria-hidden", "false");
-    }
-    if (againBtn) againBtn.hidden = false;
-    if (takeBtn) takeBtn.disabled = false;
-  }
+  async function onVideoEnd() {
+    console.log("Video ended, fetching sentences...");
+    videoSection.classList.add("fadeOut");
+    setTimeout(() => {
+      videoSection.hidden = true;
+      quizSection.hidden = false;
+      quizSection.classList.add("fadeIn");
+    }, 500);
 
-  function stageMessages() {
-    showStatus("Analyzing audio...");
-    timers.push(
-      setTimeout(() => {
-        showStatus("Detecting pronunciation...");
-      }, 700)
-    );
-    timers.push(
-      setTimeout(() => {
-        showStatus("Generating feedback...");
-      }, 1500)
-    );
-  }
-
-  async function analyze(blob) {
-    loading = true;
-    stageMessages();
     try {
-      if (spinner) spinner.hidden = false;
-      if (DEMO_MODE) {
-        return {
-          score: 9,
-          confidence: 82,
-          feedback: ["Good clarity", "Improve 'th' pronunciation", "Slight pause needed between words"],
-        };
-      }
-      const fd = new FormData();
-      fd.append("expected", getExpectedPhrase());
-      fd.append("audio", new File([blob], "test.webm", { type: blob.type || "audio/webm" }));
-      const res = await fetch("/video-test/analyze", { method: "POST", body: fd });
-      if (!res.ok) return null;
-      const data = await res.json().catch(() => null);
-      return data;
+      const res = await fetch('/api/sentences', {
+        method: 'POST',
+        body: JSON.stringify({ video_url: VIDEO_URL }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      sentences = data.sentences;
+      startQuiz();
     } catch (e) {
-      debug(e);
-      return null;
-    } finally {
-      loading = false;
-      if (spinner) spinner.hidden = true;
+      console.error("Failed to load sentences", e);
     }
   }
 
-  async function startTest() {
-    if (recording || loading) return;
-    reset();
-    recording = true;
-    if (status) {
-      status.classList.remove("testStatusHidden");
-      status.setAttribute("aria-hidden", "false");
+  // 2. Quiz Flow
+  function startQuiz() {
+    currentIdx = 0;
+    sessionScores = [];
+    showSentence();
+  }
+
+  function showSentence() {
+    if (currentIdx >= sentences.length) {
+      showFinalSummary();
+      return;
     }
-    showStatus("Recording…");
-    if (stopBtn) stopBtn.hidden = false;
-    if (takeBtn) takeBtn.disabled = true;
-    if (testMic) testMic.classList.add("micActive");
-    if (testWave) testWave.classList.add("waveActive");
+
+    quizProgress.textContent = `Sentence ${currentIdx + 1} of ${sentences.length}`;
+    const sentence = sentences[currentIdx];
+    targetSentenceText.textContent = `“${sentence}”`;
+    expectedEl.dataset.expected = sentence;
+    
+    quizResult.hidden = true;
+    takeBtn.hidden = false;
+    takeBtn.disabled = false;
+    takeBtn.textContent = "Start Recording";
+    status.classList.add("testStatusHidden");
+    statusText.textContent = "Ready";
+  }
+
+  // 3. Recording & Smart Stop
+  async function startRecording() {
+    if (recording) return;
+    recording = true;
+    chunks = [];
+    wordCount = 0;
+    lastAudioTime = Date.now();
+    
+    status.classList.remove("testStatusHidden");
+    statusText.textContent = "Listening…";
+    takeBtn.hidden = true;
+    stopBtn.hidden = false;
+    waveformContainer.hidden = false;
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Visualizer
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      const source = audioCtx.createMediaStreamSource(micStream);
+      source.connect(analyser);
+      analyser.fftSize = 2048;
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+      drawWaveform();
+
+      recorder = new MediaRecorder(micStream);
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = processRecording;
+      recorder.start();
+
+      // Simple word detection simulation for smart stop
+      // In a real app, we'd use continuous speech recognition here
+      // For this implementation, we'll assume words are being spoken if volume is high
+      const wordSim = setInterval(() => {
+        if (!recording) {
+          clearInterval(wordSim);
+          return;
+        }
+        // Increment word count based on audio pulses (simplified)
+        wordCount++; 
+      }, 1000);
+
     } catch (e) {
-      debug(e);
+      console.error(e);
       recording = false;
-      if (status) {
-        status.classList.add("testStatusHidden");
-        status.setAttribute("aria-hidden", "true");
-      }
-      showError("Analysis unavailable, try again");
-      return;
+      statusText.textContent = "Mic error. Try again.";
     }
-
-    try {
-      const candidates = ["audio/webm;codecs=opus", "audio/webm"];
-      const supported = candidates.find((t) => (window.MediaRecorder?.isTypeSupported ? MediaRecorder.isTypeSupported(t) : false));
-      recorder = supported ? new MediaRecorder(micStream, { mimeType: supported }) : new MediaRecorder(micStream);
-    } catch (e) {
-      debug(e);
-      recording = false;
-      if (status) {
-        status.classList.add("testStatusHidden");
-        status.setAttribute("aria-hidden", "true");
-      }
-      showError("Analysis unavailable, try again");
-      if (micStream) micStream.getTracks().forEach((t) => t.stop());
-      micStream = null;
-      return;
-    }
-
-    chunks = [];
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onstop = async () => {
-      if (micStream) micStream.getTracks().forEach((t) => t.stop());
-      micStream = null;
-      if (testMic) testMic.classList.remove("micActive");
-      if (testWave) testWave.classList.remove("waveActive");
-
-      const blob = new Blob(chunks, { type: "audio/webm" });
-      const data = await analyze(blob);
-      if (status) {
-        status.classList.add("testStatusHidden");
-        status.setAttribute("aria-hidden", "true");
-      }
-      if (!data || data.error) {
-        showError("Analysis unavailable, try again");
-        return;
-      }
-      setResult(data);
-    };
-
-    recorder.start();
-    timers.push(
-      setTimeout(() => {
-        if (recording) stopTest();
-      }, 3500)
-    );
   }
 
-  function stopTest() {
+  function stopRecording() {
     if (!recording) return;
     recording = false;
-    if (stopBtn) {
-      stopBtn.disabled = true;
-      stopBtn.textContent = "Stopping…";
-    }
+    if (recorder) recorder.stop();
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    if (animationId) cancelAnimationFrame(animationId);
+    if (audioCtx) audioCtx.close();
+    waveformContainer.hidden = true;
+    stopBtn.hidden = true;
+    statusText.textContent = "Analyzing…";
+  }
+
+  async function processRecording() {
+    const blob = new Blob(chunks, { type: 'audio/webm' });
+    const fd = new FormData();
+    fd.append('audio', blob);
+    fd.append('expected', expectedEl.dataset.expected);
+
     try {
-      recorder.stop();
+      const res = await fetch('/video-test/analyze', { method: 'POST', body: fd });
+      const data = await res.json();
+      showResult(data);
     } catch (e) {
-      debug(e);
-      if (micStream) micStream.getTracks().forEach((t) => t.stop());
-      micStream = null;
-      if (status) {
-        status.classList.add("testStatusHidden");
-        status.setAttribute("aria-hidden", "true");
-      }
-      showError("Analysis unavailable, try again");
+      statusText.textContent = "Analysis failed. Try again.";
+      takeBtn.hidden = false;
     }
   }
 
-  if (takeBtn) takeBtn.addEventListener("click", startTest);
-  if (stopBtn) stopBtn.addEventListener("click", stopTest);
-  if (againBtn) againBtn.addEventListener("click", reset);
+  function drawWaveform() {
+    if (!recording) return;
+    const ctx = waveformCanvas.getContext("2d");
+    analyser.getByteTimeDomainData(dataArray);
+    
+    ctx.clearRect(0, 0, waveformCanvas.width, waveformCanvas.height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#2563eb";
+    ctx.beginPath();
+    
+    const sliceWidth = waveformCanvas.width / dataArray.length;
+    let x = 0;
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const v = dataArray[i] / 128.0;
+      const y = (v * waveformCanvas.height) / 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      x += sliceWidth;
+      sum += Math.abs(dataArray[i] - 128);
+    }
+    ctx.stroke();
 
-  reset();
+    const volume = sum / dataArray.length;
+    if (volume > 5) {
+      lastAudioTime = Date.now();
+      silenceWarning.hidden = true;
+    } else if (Date.now() - lastAudioTime > 1500) {
+      silenceWarning.hidden = false;
+    }
+
+    // Smart Stop: 1.8s silence + at least 3 words
+    if (Date.now() - lastAudioTime > 1800 && wordCount >= 3) {
+      stopRecording();
+      return;
+    }
+
+    animationId = requestAnimationFrame(drawWaveform);
+  }
+
+  // 4. Results & Summary
+  function showResult(data) {
+    status.classList.add("testStatusHidden");
+    quizResult.hidden = false;
+    quizResult.classList.add("fadeIn");
+
+    // Animate bars
+    const scores = {
+      overall: data.score * 10,
+      phoneme: (data.score * 10) - 5, // Simulated breakdown for now
+      fluency: (data.score * 10) + 2,
+      rhythm: (data.score * 10) - 3
+    };
+    
+    sessionScores.push(scores.overall);
+
+    overallScoreVal.textContent = `${scores.overall}%`;
+    overallFill.style.setProperty("--p", `${scores.overall}%`);
+    phonemeScoreVal.textContent = `${scores.phoneme}%`;
+    phonemeFill.style.setProperty("--p", `${scores.phoneme}%`);
+    fluencyScoreVal.textContent = `${scores.fluency}%`;
+    fluencyFill.style.setProperty("--p", `${scores.fluency}%`);
+    rhythmScoreVal.textContent = `${scores.rhythm}%`;
+    rhythmFill.style.setProperty("--p", `${scores.rhythm}%`);
+
+    // Word Chips
+    wordChips.innerHTML = "";
+    const words = expectedEl.dataset.expected.split(" ");
+    words.forEach(w => {
+      const chip = document.createElement("span");
+      chip.className = "wordChip chipGood"; // Simplified for now
+      chip.textContent = w;
+      wordChips.appendChild(chip);
+    });
+
+    aiFeedbackText.textContent = data.feedback ? data.feedback.join(". ") : "Good job! Focus on your intonation.";
+  }
+
+  function showFinalSummary() {
+    quizResult.hidden = true;
+    finalSummary.hidden = false;
+    finalSummary.classList.add("fadeIn");
+    
+    const avg = Math.round(sessionScores.reduce((a, b) => a + b, 0) / sessionScores.length);
+    totalSessionScore.textContent = avg;
+  }
+
+  // Event Listeners
+  takeBtn.addEventListener("click", startRecording);
+  stopBtn.addEventListener("click", stopRecording);
+  nextBtn.addEventListener("click", () => {
+    currentIdx++;
+    showSentence();
+  });
+
+  initVideoDetection();
 })();

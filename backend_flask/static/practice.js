@@ -9,12 +9,17 @@
   const analyzeBtn = document.getElementById("analyzeBtn");
   const hint = document.getElementById("analyzeHint");
   const cam = document.getElementById("cam");
+  const overlay = document.getElementById("overlay");
   const camStatusText = document.getElementById("camStatusText");
   const camStatusIcon = document.getElementById("camStatusIcon");
   const micWrap = document.getElementById("micWrap");
   const miniLoad = document.getElementById("miniLoad");
   const miniLoadText = document.getElementById("miniLoadText");
   const spokenTextEl = document.getElementById("spokenText");
+  const waveformCanvas = document.getElementById("waveform");
+  const waveformContainer = document.getElementById("waveformContainer");
+  const silenceWarning = document.getElementById("silenceWarning");
+  const sentenceDisplay = document.getElementById("sentenceDisplay");
 
   const debug = () => {};
 
@@ -25,10 +30,165 @@
   let micStream = null;
   let recTimer = null;
   let recTick = null;
-  const MAX_REC_MS = 6000;
+  const MAX_REC_MS = 15000; // Increased max time for natural speech
   let speech = null;
   let speechText = "";
   let speechStarted = false;
+
+  let audioCtx = null;
+  let analyser = null;
+  let dataArray = null;
+  let animationId = null;
+  let lastAudioTime = Date.now();
+  let silenceTimer = null;
+  let wordCount = 0;
+
+  let mouthPollTimer = null;
+  const offscreenCanvas = document.createElement("canvas");
+  const offscreenCtx = offscreenCanvas.getContext("2d");
+
+  async function updateMouthStatus() {
+    if (!cam || !overlay || !camStream) return;
+    const ctx = overlay.getContext("2d");
+    if (!ctx) return;
+
+    const vw = cam.videoWidth;
+    const vh = cam.videoHeight;
+    if (!vw || !vh) return;
+
+    overlay.width = vw;
+    overlay.height = vh;
+
+    // Capture frame for backend
+    offscreenCanvas.width = 320;
+    offscreenCanvas.height = Math.round((vh / vw) * 320);
+    offscreenCtx.drawImage(cam, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+
+    const blob = await new Promise((resolve) => {
+      offscreenCanvas.toBlob((b) => resolve(b), "image/jpeg", 0.7);
+    });
+    if (!blob) return;
+
+    const fd = new FormData();
+    fd.append("frame", blob, "frame.jpg");
+
+    try {
+      const res = await fetch("/mouth-status", { method: "POST", body: fd });
+      const data = await res.json();
+
+      ctx.clearRect(0, 0, vw, vh);
+
+      if (data.mouth === "open" || data.mouth === "closed") {
+        if (camStatusText) camStatusText.textContent = "Mouth detected. Tracking active.";
+        
+        if (data.landmarks) {
+          const lm = data.landmarks;
+          const lx = lm.left.x * vw;
+          const ly = lm.left.y * vh;
+          const rx = lm.right.x * vw;
+          const ry = lm.right.y * vh;
+          const ux = lm.upper.x * vw;
+          const uy = lm.upper.y * vh;
+          const bx = lm.lower.x * vw;
+          const by = lm.lower.y * vh;
+
+          // Draw green highlight around mouth
+          ctx.beginPath();
+          ctx.moveTo(lx, ly);
+          ctx.lineTo(ux, uy);
+          ctx.lineTo(rx, ry);
+          ctx.lineTo(bx, by);
+          ctx.closePath();
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = "#00ff00"; // Pure green for better visibility
+          ctx.fillStyle = "rgba(0, 255, 0, 0.4)";
+          ctx.stroke();
+          ctx.fill();
+        }
+      } else {
+        if (camStatusText) camStatusText.textContent = "Mouth not visible. Center your face.";
+      }
+    } catch (e) {
+      debug("Mouth poll failed", e);
+    }
+  }
+
+  function startMouthPolling() {
+    if (mouthPollTimer) return;
+    mouthPollTimer = setInterval(updateMouthStatus, 100);
+  }
+
+  function stopMouthPolling() {
+    if (mouthPollTimer) {
+      clearInterval(mouthPollTimer);
+      mouthPollTimer = null;
+    }
+  }
+
+  function highlightWords(spoken) {
+    if (!sentenceDisplay) return;
+    const spokenWords = spoken.toLowerCase().split(/\s+/);
+    wordCount = spokenWords.length;
+    const targetSpans = sentenceDisplay.querySelectorAll(".p-word");
+    
+    targetSpans.forEach(span => {
+      const targetWord = span.dataset.word;
+      if (spokenWords.includes(targetWord)) {
+        span.classList.add("highlight");
+      }
+    });
+  }
+
+  function drawWaveform() {
+    if (!waveformCanvas || !analyser) return;
+    const ctx = waveformCanvas.getContext("2d");
+    const width = waveformCanvas.width;
+    const height = waveformCanvas.height;
+    
+    analyser.getByteTimeDomainData(dataArray);
+    
+    ctx.fillStyle = "rgba(255, 255, 255, 0)";
+    ctx.clearRect(0, 0, width, height);
+    
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#2563eb";
+    ctx.beginPath();
+    
+    const sliceWidth = width / dataArray.length;
+    let x = 0;
+    
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const v = dataArray[i] / 128.0;
+      const y = (v * height) / 2;
+      
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      
+      x += sliceWidth;
+      sum += Math.abs(dataArray[i] - 128);
+    }
+    
+    const volume = sum / dataArray.length;
+    if (volume > 5) {
+      lastAudioTime = Date.now();
+      if (silenceWarning) silenceWarning.hidden = true;
+    } else if (Date.now() - lastAudioTime > 2000) {
+      if (silenceWarning) silenceWarning.hidden = false;
+    }
+    
+    // Smart Stop Logic
+    if (Date.now() - lastAudioTime > 1800 && wordCount >= 3) {
+      debug("Smart stop triggered");
+      stopRecording();
+      return;
+    }
+    
+    ctx.lineTo(width, height / 2);
+    ctx.stroke();
+    
+    animationId = requestAnimationFrame(drawWaveform);
+  }
 
   function setupSpeech() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -45,6 +205,7 @@
         }
         speechText = out.trim();
         if (spokenTextEl) spokenTextEl.value = speechText;
+        highlightWords(speechText);
       };
       r.onerror = () => {};
       r.onend = () => {
@@ -59,13 +220,13 @@
   async function setupCamera() {
     if (!cam) return;
     try {
-      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
       cam.srcObject = camStream;
-      if (camStatusText) camStatusText.textContent = "Face tracking active. Keep your mouth visible.";
-      if (camStatusIcon) {
-        camStatusIcon.textContent = "✓";
-        camStatusIcon.classList.remove("isWarn");
-      }
+      cam.onloadedmetadata = () => {
+        startMouthPolling();
+      };
+      if (camStatusIcon) camStatusIcon.classList.remove("isWarn");
+      if (camStatusText) camStatusText.textContent = "Camera active. Adjust position.";
     } catch (e) {
       debug(e);
       if (camStatusText) camStatusText.textContent = "Camera not available. Please allow camera permission.";
@@ -81,7 +242,16 @@
     audioPreview.hidden = true;
     chunks = [];
     speechText = "";
+    wordCount = 0;
+    lastAudioTime = Date.now();
+    if (waveformContainer) waveformContainer.hidden = false;
     if (spokenTextEl) spokenTextEl.value = "";
+    
+    // Reset highlights
+    if (sentenceDisplay) {
+      sentenceDisplay.querySelectorAll(".p-word").forEach(s => s.classList.remove("highlight"));
+    }
+
     statusEl.textContent = "Requesting microphone…";
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -90,6 +260,20 @@
       statusEl.textContent = "Microphone permission denied";
       return;
     }
+
+    // Audio context for visualizer
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      const source = audioCtx.createMediaStreamSource(micStream);
+      source.connect(analyser);
+      analyser.fftSize = 2048;
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+      drawWaveform();
+    } catch (e) {
+      debug("Audio visualizer failed", e);
+    }
+
     try {
       const candidates = ["audio/webm;codecs=opus", "audio/webm"];
       const supported = candidates.find((t) =>
@@ -110,6 +294,10 @@
       recordedBlob = new Blob(chunks, { type: "audio/webm" });
       audioPlayer.src = URL.createObjectURL(recordedBlob);
       audioPreview.hidden = false;
+      if (waveformContainer) waveformContainer.hidden = true;
+      if (animationId) cancelAnimationFrame(animationId);
+      if (audioCtx) audioCtx.close();
+      
       statusEl.textContent = "Recorded";
       if (micStream) micStream.getTracks().forEach((t) => t.stop());
       micStream = null;
@@ -209,6 +397,7 @@
 
   setupCamera();
   window.addEventListener("beforeunload", () => {
+    stopMouthPolling();
     if (camStream) camStream.getTracks().forEach((t) => t.stop());
     if (micStream) micStream.getTracks().forEach((t) => t.stop());
   });

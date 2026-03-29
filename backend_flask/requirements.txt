@@ -3,3 +3,8 @@ bcrypt==4.2.0
 python-dotenv==1.0.1
 openai==1.57.2
 Authlib==1.3.1
+torch
+torchaudio
+numpy
+openai-whisper
+webvtt-py

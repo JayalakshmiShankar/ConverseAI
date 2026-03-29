@@ -4,85 +4,95 @@
 {% block header_title %}Video Test{% endblock %}
 
 {% block content %}
-  <section class="card">
+  <section class="card" id="videoSection">
     <div class="cardTitleRow">
-      <div class="cardTitle">Video</div>
+      <div class="cardTitle">{{ video_title or "Video" }}</div>
       <span class="pillTag">Practice</span>
     </div>
-    {% if video_url and is_youtube %}
-      <div class="videoFrame">
-        <iframe
-          src="{{ embed_url }}"
-          title="Video"
-          frameborder="0"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowfullscreen
-        ></iframe>
-      </div>
-    {% elif video_url %}
-      <video class="videoPlayer" controls>
-        <source src="{{ video_url }}" type="video/mp4" />
-      </video>
-      <div class="muted">If the video doesn’t load, replace it with your own MP4 in the app settings.</div>
-    {% else %}
-      <div class="videoPlaceholder">
-        <div class="videoPlaceholderInner">
-          <div class="videoPlaceholderTitle">Sample Video</div>
-          <div class="muted">Add a video in Learn to take a test with real content.</div>
+    <div class="videoContainer" id="videoContainer">
+      {% if video_url and is_youtube %}
+        <div class="videoFrame">
+          <iframe
+            id="lessonVideo"
+            src="{{ embed_url }}?enablejsapi=1"
+            title="Video"
+            frameborder="0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
         </div>
-      </div>
-    {% endif %}
+      {% elif video_url %}
+        <video class="videoPlayer" id="lessonVideo" controls>
+          <source src="{{ video_url }}" type="video/mp4" />
+        </video>
+      {% endif %}
+    </div>
   </section>
 
-  <section class="card">
+  <section class="card quizSection" id="quizSection" hidden>
     <div class="cardTitleRow">
-      <div class="cardTitle">Take test</div>
-      <span class="pillTag">Live</span>
+      <div class="cardTitle">Practice What You Heard</div>
+      <span class="pillTag" id="quizProgress">Sentence 1 of 5</span>
     </div>
 
-    <div class="sayPrompt" id="expectedText" data-expected="{{ expected_phrase }}">
+    <div class="sayPrompt" id="expectedText" data-expected="">
       <div class="sayPromptLabel">Say this</div>
-      <div class="sayPromptText">“{{ expected_phrase }}”</div>
+      <div class="sayPromptText" id="targetSentenceText">“...”</div>
+    </div>
+
+    <div class="waveformContainer" id="waveformContainer" hidden>
+      <canvas id="waveform" class="waveformCanvas"></canvas>
+      <div class="silenceWarning" id="silenceWarning" hidden>⚠ Too quiet! Speak louder.</div>
     </div>
 
     <div class="testActions">
-      <button class="btnPrimary" type="button" id="takeTestBtn">Take Test</button>
+      <button class="btnPrimary" type="button" id="takeTestBtn">Start Recording</button>
       <button class="btnGhost" type="button" id="stopTestBtn" hidden>Stop</button>
-      <button class="btnGhost" type="button" id="takeAgainBtn" hidden>Take Again</button>
     </div>
 
-    <div class="testStatus testStatusHidden" id="testStatus" aria-hidden="true">
-      <div class="micWrap" id="testMic">
-        <div class="micCore"></div>
-        <div class="micRing"></div>
-      </div>
-      <div class="muted" id="statusText">Recording…</div>
-      <div class="aiSpinnerSm" id="testSpinner" hidden></div>
-      <div class="wave" id="testWave" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
+    <div class="testStatus testStatusHidden" id="testStatus">
+      <div class="muted" id="statusText">Ready</div>
     </div>
 
-    <div class="resultCard resultCardHidden" id="resultCard" aria-hidden="true">
-      <div class="resultTop">
-        <div class="scoreBadge" id="scoreBadge">
-          <span id="scoreVal">0</span><span>/10</span>
+    <div class="quizResult" id="quizResult" hidden>
+      <div class="scoreBars">
+        <div class="scoreBarItem">
+          <div class="scoreLabelRow"><span>Overall</span><span id="overallScoreVal">0%</span></div>
+          <div class="progressBar"><div class="progressFill" id="overallFill" style="--p: 0%"></div></div>
         </div>
-        <div class="resultMeta">
-          <div class="muted">Confidence</div>
-          <div class="resultMetaVal"><span id="confVal">0</span><span class="muted">%</span></div>
+        <div class="scoreBarItem">
+          <div class="scoreLabelRow"><span>Phoneme</span><span id="phonemeScoreVal">0%</span></div>
+          <div class="progressBar"><div class="progressFill" id="phonemeFill" style="--p: 0%"></div></div>
+        </div>
+        <div class="scoreBarItem">
+          <div class="scoreLabelRow"><span>Fluency</span><span id="fluencyScoreVal">0%</span></div>
+          <div class="progressBar"><div class="progressFill" id="fluencyFill" style="--p: 0%"></div></div>
+        </div>
+        <div class="scoreBarItem">
+          <div class="scoreLabelRow"><span>Rhythm</span><span id="rhythmScoreVal">0%</span></div>
+          <div class="progressBar"><div class="progressFill" id="rhythmFill" style="--p: 0%"></div></div>
         </div>
       </div>
 
-      <div class="cardTitle">Improvements</div>
-      <ul class="improveList" id="improveList"></ul>
+      <div class="wordChips" id="wordChips"></div>
+      <div class="aiFeedbackText" id="aiFeedbackText"></div>
+      
+      <button class="btnPrimary" type="button" id="nextSentenceBtn">Next Sentence</button>
     </div>
 
-    <div class="flash flash-error testErrorHidden" id="testError" aria-hidden="true">Analysis unavailable, try again</div>
+    <div class="finalSummary" id="finalSummary" hidden>
+      <div class="finalScoreRing">
+        <div class="finalScoreVal" id="totalSessionScore">0</div>
+        <div class="muted">Session Avg</div>
+      </div>
+      <a class="btnPrimary" href="{{ url_for('learn') }}">Back to Lessons</a>
+    </div>
   </section>
 
   <script>
+    window.__VIDEO_URL__ = "{{ video_url }}";
     window.__DEMO_MODE__ = {{ "true" if demo else "false" }};
   </script>
+  <script src="https://www.youtube.com/iframe_api"></script>
   <script src="{{ url_for('static', filename='video_test.js') }}"></script>
 {% endblock %}

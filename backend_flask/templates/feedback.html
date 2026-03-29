@@ -51,12 +51,25 @@
 
         <div class="metrics">
           <div class="metric">
-            <div class="metricLabel">Accuracy</div>
-            <div class="metricValue">{{ feedback["accuracy"] }}%</div>
+            <div class="metricLabelRow">
+              <span class="metricLabel">Phoneme</span>
+              <span class="metricValue">{{ feedback["phoneme_score"] }}%</span>
+            </div>
+            <div class="progressBar"><div class="progressFill" style="--p: {{ feedback['phoneme_score'] }}%"></div></div>
           </div>
           <div class="metric">
-            <div class="metricLabel">Fluency</div>
-            <div class="metricValue">{{ feedback["fluency"] }}%</div>
+            <div class="metricLabelRow">
+              <span class="metricLabel">Fluency</span>
+              <span class="metricValue">{{ feedback["fluency"] }}%</span>
+            </div>
+            <div class="progressBar"><div class="progressFill" style="--p: {{ feedback['fluency'] }}%"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metricLabelRow">
+              <span class="metricLabel">Rhythm</span>
+              <span class="metricValue">{{ feedback["rhythm_score"] }}%</span>
+            </div>
+            <div class="progressBar"><div class="progressFill" style="--p: {{ feedback['rhythm_score'] }}%"></div></div>
           </div>
         </div>
         {% if feedback["demo_stt"] %}
@@ -65,8 +78,8 @@
       </section>
 
       <section class="card cardGreen">
-        <div class="cardTitle">Feedback</div>
-        <div class="aiFeedback" id="aiFeedback">Generating feedback…</div>
+        <div class="cardTitle">AI Feedback</div>
+        <div class="aiFeedback" id="aiFeedback">{{ feedback["ai_feedback"] if feedback["ai_feedback"] else "Generating feedback..." }}</div>
         <div class="muted">Transcript</div>
         <div class="sentenceBox">{{ session["transcript"] }}</div>
         <div class="muted">Expected</div>
@@ -78,12 +91,31 @@
     <div class="cardTitle">Word-level Feedback</div>
     <div class="wordGrid">
       {% for w in feedback["word_rows"] %}
-        <span class="word {% if w['ok'] %}wordOk{% else %}wordBad{% endif %}">
-          {{ w["expected"] if w["expected"] else "—" }}
-        </span>
+        <div class="wordBox">
+          <span class="word {% if w['ok'] and not w['weak'] %}wordOk{% elif w['weak'] %}wordWeak{% else %}wordBad{% endif %}">
+            {{ w["expected"] if w["expected"] else "—" }}
+          </span>
+          {% if w['weak'] %}
+            <div class="wordActual" style="color: #f59e0b;">Weak clarity</div>
+          {% elif not w['ok'] and w['actual'] %}
+            <div class="wordActual">You said: "{{ w['actual'] }}"</div>
+          {% endif %}
+          
+          {# Advanced Phoneme Feedback #}
+          {% if feedback["advanced_feedback"] %}
+            {% set adv = feedback["advanced_feedback"][loop.index0] %}
+            {% if adv and adv.word.lower() == w.expected.lower() %}
+              <div class="phonemeRow">
+                {% for ph in adv.phonemes %}
+                  <span class="phChar ph-{{ ph.status }}">{{ ph.char }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endif %}
+        </div>
       {% endfor %}
     </div>
-    <div class="muted">Green = matched word positions. Red = needs improvement.</div>
+    <div class="muted">Green = Perfect. Yellow = Weak. Red = Needs improvement.</div>
   </section>
 
   <section class="card">
@@ -131,16 +163,6 @@
       var confPct = document.getElementById("confPct");
       var thinkingText = document.getElementById("thinkingText");
       var aiFeedback = document.getElementById("aiFeedback");
-
-      var feedbacks = [
-        "Great clarity and pacing.",
-        "Good pronunciation, improve the 'th' sound.",
-        "Excellent fluency, slight stress issues.",
-        "Nice effort. Slow down a little and keep consonants crisp.",
-        "Strong delivery. Focus on smoother transitions between sounds."
-      ];
-      var randomFeedback = feedbacks[Math.floor(Math.random() * feedbacks.length)];
-      if (aiFeedback) aiFeedback.textContent = randomFeedback;
 
       function show(text, delay) {
         setTimeout(function () {
