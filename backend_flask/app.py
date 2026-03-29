@@ -38,13 +38,6 @@ LANGUAGES = [
     {"id": "es-ES", "label": "Spanish"},
 ]
 
-LANGUAGE_PRICES_INR = {
-    "en-US": 200,
-    "en-GB": 200,
-    "es-ES": 200,
-    "de-DE": 200,
-}
-
 
 def _lang_to_whisper_code(language_id: str) -> str:
     if language_id in {"en-US", "en-GB"}:
@@ -519,15 +512,30 @@ def create_app() -> Flask:
                 ]
                 db.executemany("INSERT INTO sentences (language, text) VALUES (?, ?)", seed)
 
+            if db.execute("SELECT COUNT(*) FROM learning_videos WHERE language = 'en-US' AND title LIKE 'Level %'").fetchone()[0] == 0:
+                # Remove default en-US video if it exists
+                db.execute("DELETE FROM learning_videos WHERE language = 'en-US' AND title = 'English TH sound (guide)'")
+                
+                vids = [
+                    ("en-US", "Level 1 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDfhVMerPPR2YqOP1XOeBTm&si=4BBfFAn2IFKAoRPy"),
+                    ("en-US", "Level 2 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDf5Wc_Y5JZS17taUi2WWgx&si=CddChK4ALcBpMA7L"),
+                    ("en-US", "Level 3 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDimnOyDv32VnEVFqhAItAy&si=v3ZpJ8iAhMcsYCOg"),
+                    ("en-US", "Level 4 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgDJkl2T7xAews-GoJMc4I7j&si=TNLKk8PBKSQTIzqi"),
+                    ("en-US", "Level 5 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgBACqEFo5TuhJWAReRNNTc8&si=o0TIHA4sIQVU_xQi"),
+                    ("en-US", "Level 6 - US Pronunciation", "https://youtube.com/playlist?list=PLKWcPfZiScgAutnWOSAh2AH026L9w8c18&si=NQgnwgFjUxK8hfqe"),
+                ]
+                db.executemany("INSERT INTO learning_videos (language, title, url) VALUES (?, ?, ?)", vids)
+                db.commit()
+
             if db.execute("SELECT COUNT(*) FROM learning_videos").fetchone()[0] == 0:
                 vids = [
-                    ("en-US", "English TH sound (guide)", "https://www.youtube.com/watch?v=J6JcK8qC6xk"),
                     ("en-GB", "British English pronunciation basics", "https://www.youtube.com/watch?v=9kQimR4D_s0"),
                     ("ja-JP", "Japanese pronunciation tips", "https://www.youtube.com/watch?v=7Yl1WnO_KtQ"),
                     ("de-DE", "German CH sound explained", "https://www.youtube.com/watch?v=Y1lJxgJ5p0c"),
                     ("es-ES", "Spanish rolled R practice", "https://www.youtube.com/watch?v=3wqO7dLrPQQ"),
                 ]
                 db.executemany("INSERT INTO learning_videos (language, title, url) VALUES (?, ?, ?)", vids)
+                db.commit()
 
     init_db()
 
@@ -893,18 +901,11 @@ def create_app() -> Flask:
         last_score = float(last["score"]) if last else None
 
         msg = "Start your first practice today." if streak_days == 0 else f"You're on a {streak_days}-day streak!"
-        rows = db_safe(
-            lambda: g.db.execute("SELECT language_id FROM language_access WHERE user_id = ?", (user_id,)).fetchall(),
-            [],
-        )
-        owned = {str(r["language_id"]) for r in (rows or []) if r and r["language_id"]}
         return render_template(
             "dashboard.html",
             user=user,
             profile=profile_row,
             languages=LANGUAGES,
-            language_prices=LANGUAGE_PRICES_INR,
-            owned_languages=owned,
             streak_days=streak_days,
             points=points,
             last_score=last_score,
@@ -1023,107 +1024,7 @@ def create_app() -> Flask:
                 (language_id, updated_at, user_id),
             )
         g.db.commit()
-        return redirect(url_for("practice"))
-
-    @app.post("/purchase-language")
-    @login_required
-    def purchase_language():
-        user_id = int(session["user_id"])
-        language_id = (request.form.get("language") or "").strip()
-        bank = (request.form.get("bank") or "").strip()
-        acc = (request.form.get("acc") or "").strip()
-        ifsc = (request.form.get("ifsc") or "").strip()
-        if language_id not in {l["id"] for l in LANGUAGES}:
-            flash("Select a valid language.", "error")
-            return redirect(url_for("dashboard"))
-        if not (bank and acc and ifsc):
-            flash("Please fill bank details to proceed.", "error")
-            return redirect(url_for("dashboard"))
-        price = int(LANGUAGE_PRICES_INR.get(language_id, 200))
-        now = datetime.utcnow().isoformat()
-        db_safe(
-            lambda: g.db.execute(
-                """
-                INSERT OR REPLACE INTO language_access (user_id, language_id, price_inr, purchased_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (user_id, language_id, price, now),
-            ),
-            None,
-        )
-        db_safe(lambda: g.db.commit(), None)
-
-        updated_at = datetime.utcnow().isoformat()
-        if get_profile(user_id) is None:
-            g.db.execute(
-                "INSERT INTO profiles (user_id, photo_filename, selected_language, updated_at) VALUES (?, ?, ?, ?)",
-                (user_id, None, language_id, updated_at),
-            )
-        else:
-            g.db.execute(
-                "UPDATE profiles SET selected_language = ?, updated_at = ? WHERE user_id = ?",
-                (language_id, updated_at, user_id),
-            )
-        g.db.commit()
-        flash("Language unlocked. Lifetime access enabled.", "success")
-        return redirect(url_for("practice"))
-
-    @app.post("/purchase-language/api")
-    @login_required
-    def purchase_language_api():
-        user_id = int(session["user_id"])
-        language_id = (request.form.get("language") or "").strip()
-        bank = (request.form.get("bank") or "").strip()
-        acc = (request.form.get("acc") or "").strip()
-        ifsc = (request.form.get("ifsc") or "").strip()
-
-        if language_id not in {l["id"] for l in LANGUAGES}:
-            return {"ok": False, "message": "Select a valid language."}, 400
-        if not (bank and acc and ifsc):
-            return {"ok": False, "message": "Please fill bank details to proceed."}, 400
-
-        price = int(LANGUAGE_PRICES_INR.get(language_id, 200))
-        txn = uuid.uuid4().hex[:10].upper()
-        now = datetime.utcnow().isoformat()
-
-        try:
-            db_safe(
-                lambda: g.db.execute(
-                    """
-                    INSERT OR REPLACE INTO language_access (user_id, language_id, price_inr, purchased_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (user_id, language_id, price, now),
-                ),
-                None,
-            )
-            db_safe(lambda: g.db.commit(), None)
-
-            updated_at = datetime.utcnow().isoformat()
-            if get_profile(user_id) is None:
-                g.db.execute(
-                    "INSERT INTO profiles (user_id, photo_filename, selected_language, updated_at) VALUES (?, ?, ?, ?)",
-                    (user_id, None, language_id, updated_at),
-                )
-            else:
-                g.db.execute(
-                    "UPDATE profiles SET selected_language = ?, updated_at = ? WHERE user_id = ?",
-                    (language_id, updated_at, user_id),
-                )
-            g.db.commit()
-        except Exception:
-            logger.exception("purchase_language_api failed")
-            return {"ok": False, "message": "Payment failed. Please try again."}, 200
-
-        return {
-            "ok": True,
-            "transaction_id": txn,
-            "language_id": language_id,
-            "price_inr": price,
-            "bank": bank,
-            "message": "Payment confirmed. Lifetime access enabled.",
-            "redirect": url_for("practice"),
-        }
+        return redirect(url_for("learn"))
 
     @app.get("/practice")
     @login_required
@@ -1648,10 +1549,32 @@ def create_app() -> Flask:
             return gate
         profile_row = get_profile(user_id)
         language_id = profile_row["selected_language"]
-        videos = g.db.execute(
+        rows = g.db.execute(
             "SELECT id, title, url FROM learning_videos WHERE language = ? ORDER BY id ASC",
             (language_id,),
         ).fetchall()
+        
+        videos = []
+        for r in rows:
+            v = dict(r)
+            url = v["url"]
+            v["is_youtube"] = "youtube.com" in url or "youtu.be" in url
+            v["embed_url"] = ""
+            if v["is_youtube"]:
+                if "list=" in url:
+                    # Playlist
+                    pid = url.split("list=")[-1].split("&")[0]
+                    v["embed_url"] = f"https://www.youtube.com/embed/videoseries?list={pid}"
+                elif "watch?v=" in url:
+                    # Single video
+                    vid = url.split("watch?v=")[-1].split("&")[0]
+                    v["embed_url"] = f"https://www.youtube.com/embed/{vid}"
+                elif "youtu.be/" in url:
+                    # Short link
+                    vid = url.split("youtu.be/")[-1].split("?")[0]
+                    v["embed_url"] = f"https://www.youtube.com/embed/{vid}"
+            videos.append(v)
+            
         user = get_user(user_id)
         return render_template("learn.html", user=user, profile=profile_row, language_id=language_id, videos=videos)
 

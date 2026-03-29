@@ -14,8 +14,23 @@
       <section class="card videoCard">
         <div class="videoTitle">{{ v["title"] }}</div>
         <div class="muted">{{ language_id }}</div>
+        
+        {% if v["embed_url"] %}
+          <div class="videoFrame" style="margin: 12px 0; border-radius: 12px; overflow: hidden; aspect-ratio: 16/9;">
+            <iframe
+              width="100%"
+              height="100%"
+              src="{{ v['embed_url'] }}"
+              title="{{ v['title'] }}"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+        {% endif %}
+        
         <div class="cardActions">
-          <a class="btnPrimary" href="{{ v['url'] }}" target="_blank" rel="noreferrer">Watch</a>
+          <a class="btnPrimary" href="{{ v['url'] }}" target="_blank" rel="noreferrer">Watch on YouTube</a>
           <a class="btnGhost" href="{{ url_for('video_test', video_id=v['id']) }}">Take test</a>
           <a class="btnGhost" href="{{ url_for('practice') }}">Practice</a>
         </div>
@@ -27,203 +42,4 @@
       </section>
     {% endif %}
   </div>
-
-  <section class="card">
-    <div class="cardTitleRow">
-      <div class="cardTitle">Online learning sessions</div>
-      <span class="pillTag">New</span>
-    </div>
-    <div class="muted">Book 1:1 sessions to get guided feedback and a personalized plan.</div>
-
-    <div class="sessionGrid">
-      <div class="sessionCard">
-        <div class="sessionName">Starter</div>
-        <div class="sessionPrice">₹499 <span class="muted">/ session</span></div>
-        <div class="muted">10 minutes • quick correction</div>
-        <div class="cardActions">
-          <button class="btnPrimary" type="button" data-book="Starter">Book Starter</button>
-        </div>
-      </div>
-      <div class="sessionCard sessionCardFeatured">
-        <div class="sessionName">Standard</div>
-        <div class="sessionPrice">₹999 <span class="muted">/ session</span></div>
-        <div class="muted">25 minutes • detailed feedback</div>
-        <div class="cardActions">
-          <button class="btnPrimary" type="button" data-book="Standard">Book Standard</button>
-        </div>
-      </div>
-      <div class="sessionCard">
-        <div class="sessionName">Pro</div>
-        <div class="sessionPrice">₹1999 <span class="muted">/ session</span></div>
-        <div class="muted">45 minutes • full coaching</div>
-        <div class="cardActions">
-          <button class="btnPrimary" type="button" data-book="Pro">Book Pro</button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <div class="modal" id="payModal" hidden>
-    <div class="modalCard">
-      <div class="payTitleRow">
-        <div>
-          <div class="cardTitle">Secure checkout</div>
-          <div class="muted" id="paySubtitle">Choose a bank to proceed</div>
-        </div>
-      </div>
-
-      <div class="paySummary" id="paySummary">
-        <div class="paySummaryLeft">
-          <div class="muted">Plan</div>
-          <div class="payPlan" id="payPlan">Standard</div>
-        </div>
-        <div class="paySummaryRight">
-          <div class="muted">Amount</div>
-          <div class="payAmount" id="payAmount">₹0</div>
-        </div>
-      </div>
-
-      <div class="muted payDisclaimer">Payments are currently in preview mode.</div>
-
-      <div id="payStepForm">
-        <div class="payForm">
-          <label class="field">
-            <span class="fieldLabel">Select bank</span>
-            <select class="input" id="payBank">
-              <option value="">Choose bank</option>
-              <option>SBI</option>
-              <option>HDFC Bank</option>
-              <option>ICICI Bank</option>
-              <option>Axis Bank</option>
-              <option>Kotak Mahindra Bank</option>
-              <option>Punjab National Bank</option>
-              <option>Canara Bank</option>
-              <option>Bank of Baroda</option>
-              <option>Union Bank of India</option>
-              <option>IDFC FIRST Bank</option>
-              <option>Other Bank</option>
-            </select>
-          </label>
-
-          <div class="payGrid2">
-            <label class="field">
-              <span class="fieldLabel">Account number</span>
-              <input class="input" id="payAcc" type="text" inputmode="numeric" placeholder="000000000000" />
-            </label>
-            <label class="field">
-              <span class="fieldLabel">IFSC</span>
-              <input class="input" id="payIfsc" type="text" placeholder="ABCD0123456" />
-            </label>
-          </div>
-        </div>
-
-        <div class="quickActions">
-          <button class="btnGhost" type="button" id="payCancel">Cancel</button>
-          <button class="btnPrimary" type="button" id="payProceed">Proceed</button>
-        </div>
-      </div>
-
-      <div id="payStepProcessing" hidden>
-        <div class="payProcessing">
-          <div class="aiSpinner"></div>
-          <div>
-            <div class="payProcessingTitle">Processing…</div>
-            <div class="muted" id="payProcessingText">Connecting to bank…</div>
-          </div>
-        </div>
-      </div>
-
-      <div id="payStepDone" hidden>
-        <div class="paySuccess">
-          <div class="paySuccessBadge">Paid</div>
-          <div class="paySuccessTitle">Payment successful</div>
-          <div class="muted" id="paySuccessText">Your session is booked.</div>
-        </div>
-        <div class="quickActions">
-          <button class="btnPrimary" type="button" id="payClose">Done</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    (function () {
-      var modal = document.getElementById("payModal");
-      var planEl = document.getElementById("payPlan");
-      var amountEl = document.getElementById("payAmount");
-      var bankEl = document.getElementById("payBank");
-      var accEl = document.getElementById("payAcc");
-      var ifscEl = document.getElementById("payIfsc");
-      var cancelBtn = document.getElementById("payCancel");
-      var proceedBtn = document.getElementById("payProceed");
-      var closeBtn = document.getElementById("payClose");
-      var stepForm = document.getElementById("payStepForm");
-      var stepProcessing = document.getElementById("payStepProcessing");
-      var stepDone = document.getElementById("payStepDone");
-      var processingText = document.getElementById("payProcessingText");
-      var successText = document.getElementById("paySuccessText");
-
-      function setSteps(formOn, processingOn, doneOn) {
-        if (stepForm) stepForm.hidden = !formOn;
-        if (stepProcessing) stepProcessing.hidden = !processingOn;
-        if (stepDone) stepDone.hidden = !doneOn;
-      }
-
-      function open(plan) {
-        var price = plan === "Starter" ? "₹499" : plan === "Pro" ? "₹1999" : "₹999";
-        if (planEl) planEl.textContent = plan || "Standard";
-        if (amountEl) amountEl.textContent = price;
-        if (bankEl) bankEl.value = "";
-        if (accEl) accEl.value = "";
-        if (ifscEl) ifscEl.value = "";
-        setSteps(true, false, false);
-        if (modal) modal.hidden = false;
-      }
-
-      function close() {
-        if (modal) modal.hidden = true;
-      }
-
-      function proceed() {
-        var bank = (bankEl && bankEl.value) || "";
-        var acc = (accEl && accEl.value) || "";
-        var ifsc = (ifscEl && ifscEl.value) || "";
-        if (!bank || !acc || !ifsc) return;
-
-        setSteps(false, true, false);
-        if (processingText) processingText.textContent = "Connecting to bank…";
-        setTimeout(function () {
-          if (processingText) processingText.textContent = "Verifying details…";
-        }, 500);
-        setTimeout(function () {
-          if (processingText) processingText.textContent = "Confirming payment…";
-        }, 1100);
-        setTimeout(function () {
-          setSteps(false, false, true);
-          var plan = planEl ? planEl.textContent : "session";
-          var amount = amountEl ? amountEl.textContent : "";
-          if (successText) successText.textContent = "Booked " + plan + " (" + amount + ")";
-        }, 1600);
-      }
-
-      document.addEventListener("click", function (e) {
-        var btn = e.target.closest("button[data-book]");
-        if (!btn) return;
-        open(btn.getAttribute("data-book") || "Standard");
-      });
-
-      if (cancelBtn) cancelBtn.addEventListener("click", close);
-      if (closeBtn) closeBtn.addEventListener("click", close);
-      if (proceedBtn) proceedBtn.addEventListener("click", proceed);
-      if (modal)
-        modal.addEventListener("click", function (e) {
-          if (e.target === modal) close();
-        });
-
-      document.addEventListener("click", function (e) {
-        var closeEl = e.target.closest("#payClose");
-        if (closeEl) close();
-      });
-    })();
-  </script>
 {% endblock %}
