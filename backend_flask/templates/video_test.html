@@ -46,6 +46,13 @@
     </div>
 
     <div class="testActions">
+      <div class="micWrap" id="micWrap" aria-hidden="true" hidden>
+        <div class="micCore"></div>
+        <div class="micRing"></div>
+        <div class="wave">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
       <button class="btnPrimary" type="button" id="takeTestBtn">Start Recording</button>
       <button class="btnGhost" type="button" id="stopTestBtn" hidden>Stop</button>
     </div>
@@ -90,8 +97,8 @@
   </section>
 
   <script>
-    window.__VIDEO_URL__ = "{{ video_url }}";
-    window.__DEMO_MODE__ = {{ "true" if demo else "false" }};
+    window.__VIDEO_URL__ = JSON.parse('{{ video_url|tojson }}');
+    window.__DEMO_MODE__ = JSON.parse('{{ demo|tojson }}');
   </script>
   <script src="https://www.youtube.com/iframe_api"></script>
   <script src="{{ url_for('static', filename='video_test.js') }}"></script>

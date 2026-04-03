@@ -18,6 +18,7 @@
   const aiFeedbackText = document.getElementById("aiFeedbackText");
   const finalSummary = document.getElementById("finalSummary");
   const totalSessionScore = document.getElementById("totalSessionScore");
+  const micWrap = document.getElementById("micWrap");
 
   // Score display elements
   const overallScoreVal = document.getElementById("overallScoreVal");
@@ -131,6 +132,10 @@
     takeBtn.hidden = true;
     stopBtn.hidden = false;
     waveformContainer.hidden = false;
+    if (micWrap) {
+      micWrap.hidden = false;
+      micWrap.classList.add("micActive");
+    }
 
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -177,6 +182,10 @@
     if (audioCtx) audioCtx.close();
     waveformContainer.hidden = true;
     stopBtn.hidden = true;
+    if (micWrap) {
+      micWrap.hidden = true;
+      micWrap.classList.remove("micActive");
+    }
     statusText.textContent = "Analyzing…";
   }
 

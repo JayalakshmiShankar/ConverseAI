@@ -20,8 +20,27 @@
   const waveformContainer = document.getElementById("waveformContainer");
   const silenceWarning = document.getElementById("silenceWarning");
   const sentenceDisplay = document.getElementById("sentenceDisplay");
+  const listenBtn = document.getElementById("listenBtn");
 
   const debug = () => {};
+
+  if (listenBtn) {
+    listenBtn.addEventListener("click", () => {
+      const text = window.__TARGET_TEXT__ || "";
+      const lang = window.__LANG_ID__ || "en-US";
+      if (!text) return;
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang;
+      
+      // Try to find a high quality native voice
+      const voices = window.speechSynthesis.getVoices();
+      const nativeVoice = voices.find(v => v.lang === lang && !v.localService);
+      if (nativeVoice) utterance.voice = nativeVoice;
+      
+      window.speechSynthesis.speak(utterance);
+    });
+  }
 
   let recorder = null;
   let chunks = [];
@@ -44,17 +63,27 @@
   let wordCount = 0;
 
   let mouthPollTimer = null;
+  let isMouthUpdating = false;
+  let mouthAbortController = null;
   const offscreenCanvas = document.createElement("canvas");
   const offscreenCtx = offscreenCanvas.getContext("2d");
 
   async function updateMouthStatus() {
-    if (!cam || !overlay || !camStream) return;
+    if (isMouthUpdating || !cam || !overlay || !camStream) return;
+    isMouthUpdating = true;
+
     const ctx = overlay.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      isMouthUpdating = false;
+      return;
+    }
 
     const vw = cam.videoWidth;
     const vh = cam.videoHeight;
-    if (!vw || !vh) return;
+    if (!vw || !vh) {
+      isMouthUpdating = false;
+      return;
+    }
 
     overlay.width = vw;
     overlay.height = vh;
@@ -67,13 +96,23 @@
     const blob = await new Promise((resolve) => {
       offscreenCanvas.toBlob((b) => resolve(b), "image/jpeg", 0.7);
     });
-    if (!blob) return;
+    if (!blob) {
+      isMouthUpdating = false;
+      return;
+    }
 
     const fd = new FormData();
     fd.append("frame", blob, "frame.jpg");
 
+    if (mouthAbortController) mouthAbortController.abort();
+    mouthAbortController = new AbortController();
+
     try {
-      const res = await fetch("/mouth-status", { method: "POST", body: fd });
+      const res = await fetch("/mouth-status", { 
+        method: "POST", 
+        body: fd,
+        signal: mouthAbortController.signal
+      });
       const data = await res.json();
 
       ctx.clearRect(0, 0, vw, vh);
@@ -109,7 +148,11 @@
         if (camStatusText) camStatusText.textContent = "Mouth not visible. Center your face.";
       }
     } catch (e) {
-      debug("Mouth poll failed", e);
+      if (e.name !== 'AbortError') {
+        debug("Mouth poll failed", e);
+      }
+    } finally {
+      isMouthUpdating = false;
     }
   }
 
@@ -123,6 +166,11 @@
       clearInterval(mouthPollTimer);
       mouthPollTimer = null;
     }
+    if (mouthAbortController) {
+      mouthAbortController.abort();
+      mouthAbortController = null;
+    }
+    isMouthUpdating = false;
   }
 
   function highlightWords(spoken) {

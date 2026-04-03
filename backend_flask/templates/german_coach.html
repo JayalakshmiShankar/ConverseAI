@@ -1,0 +1,134 @@
+{% extends "_app_layout.html" %}
+
+{% block title %}Sprich Richtig! • ConverseAI{% endblock %}
+
+{% block content %}
+<div class="germanCoachContainer">
+  <!-- 1. HEADER -->
+  <header class="coachHeader">
+    <div class="badgeRow">
+      <span class="emojiBadge">🇩🇪</span>
+      <span class="badgeText">Deutsch · Aussprache Trainer</span>
+    </div>
+    <h1 class="coachTitle">Sprich Richtig!</h1>
+    <p class="coachSubtitle">German Pronunciation Coach · Detect, Correct & Perfect your Deutsch</p>
+  </header>
+
+  <!-- 2. STATS ROW -->
+  <div class="statsGrid">
+    <div class="statCard statRichtig">
+      <div class="statLabel">✅ Correct</div>
+      <div class="statValue" id="correctCount">0</div>
+    </div>
+    <div class="statCard statFalsch">
+      <div class="statLabel">❌ Wrong</div>
+      <div class="statValue" id="wrongCount">0</div>
+    </div>
+    <div class="statCard statSerie">
+      <div class="statLabel">🔥 Streak</div>
+      <div class="statValue" id="streakCount">0</div>
+    </div>
+  </div>
+
+  <!-- 3. PROGRESS BAR -->
+  <div class="progressSection">
+    <div class="progressMeta">
+      <span id="progressText">Question 1 of 10</span>
+      <span class="scorePill" id="scorePill">0%</span>
+    </div>
+    <div class="progressTrack">
+      <div class="progressFillAnimated" id="progressFill" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- 4. CATEGORY TABS -->
+  <div class="categoryTabs" id="categoryTabs">
+    <button class="tabBtn active" data-cat="Alle">🌟 All</button>
+    <button class="tabBtn" data-cat="Umlaute">Umlauts</button>
+    <button class="tabBtn" data-cat="CH-Laut">CH-Sound</button>
+    <button class="tabBtn" data-cat="R-Laut">R-Sound</button>
+    <button class="tabBtn" data-cat="Vokale">Vowels</button>
+    <button class="tabBtn" data-cat="Konsonanten">Consonants</button>
+    <button class="tabBtn" data-cat="Sätze">Phrases</button>
+  </div>
+
+  <!-- 5. MAIN QUIZ CARD -->
+  <div id="quizCard" class="card mainQuizCard">
+    <div class="quizCardHeader">
+      <span class="topicChip" id="topicChip">Umlauts</span>
+      <span class="questionNum" id="questionNum">#1</span>
+    </div>
+
+    <div class="wordSection">
+      <div class="sectionLabel">Pronounce this word</div>
+      <div class="largeWord goldSerif" id="targetWord" title="Click to hear pronunciation">Eichhörnchen</div>
+      <div class="ipaDisplay blueMonospace" id="ipaText">[ˈaɪçˌhœrnçən]</div>
+      <div class="englishLabel">Meaning: <span class="meaningText mutedItalic" id="meaningText">squirrel</span></div>
+    </div>
+
+    <div class="hintBox">
+      <div class="hintTag">💡 Pronunciation Tip</div>
+      <div class="hintContent" id="hintContent">
+        The <span class="phoneme">ch</span> after <span class="phoneme">i</span> is a soft, hissing sound. Round your lips for <span class="phoneme">ö</span>.
+      </div>
+    </div>
+
+    <div class="micZone" id="micZone">
+      <div class="micIcon">🎙️</div>
+      <div class="micStatus" id="micStatus">Click & speak the word</div>
+      <div class="micAnimations" id="micAnimations" hidden>
+        <div class="redDot"></div>
+        <div class="wave">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="buttonRow">
+      <button class="btnGhost" id="listenBtn">🔊 Listen</button>
+      <button class="btnPrimary goldBtn" id="recBtn">🎙️ Record</button>
+      <button class="btnGhost" id="skipBtn">⏭️ Skip</button>
+    </div>
+
+    <!-- Result Panel (Slide Up) -->
+    <div id="resultPanel" class="resultPanel" hidden>
+      <div class="resultHeader">
+        <span class="resultIcon" id="resultIcon">✅</span>
+        <span class="resultTitle" id="resultTitle">Excellent!</span>
+      </div>
+      <div class="transcriptLine">I heard: <span id="transcriptText">...</span></div>
+      
+      <div class="syllableContainer" id="syllableChips">
+        <!-- Syllable pills go here -->
+      </div>
+
+      <div class="correctionBox" id="correctionBox" hidden>
+        <div class="boxLabel">Correction Guide</div>
+        <div class="correctionContent" id="correctionGuide"></div>
+      </div>
+
+      <div class="aiFeedbackBox">
+        <div class="aiLabel">AI Coaching</div>
+        <div class="aiDots" id="aiLoading" hidden><span></span><span></span><span></span></div>
+        <div class="aiText" id="aiFeedback">...</div>
+      </div>
+
+      <div class="navRow">
+        <button class="btnGhost" id="prevBtn">← Back</button>
+        <button class="btnPrimary" id="nextBtn">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. COMPLETION SCREEN -->
+  <div id="completionScreen" class="card completionCard" hidden>
+    <div class="trophy">🏆</div>
+    <div class="gradeDisplay" id="gradeVal">A</div>
+    <h2 id="completionTitle">Well done!</h2>
+    <p id="completionMsg">You've completed this set with a great score.</p>
+    <button class="btnPrimary goldBtn" id="restartBtn">🔄 Practice Again</button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='german_coach.js') }}"></script>
+{% endblock %}

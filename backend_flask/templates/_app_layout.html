@@ -28,7 +28,11 @@
           <a class="sideLink {% if ep in ['practice', 'feedback', 'upload_audio'] %}sideLinkActive{% endif %}" href="{{ url_for('practice') }}">Test</a>
           <a class="sideLink {% if ep in ['ai_conversation', 'ai_conversation_upload', 'ai_conversation_text'] %}sideLinkActive{% endif %}" href="{{ url_for('ai_conversation') }}">AIConvo</a>
           <a class="sideLink {% if ep == 'streaks' %}sideLinkActive{% endif %}" href="{{ url_for('streaks') }}">Streaks</a>
-          <a class="sideLink {% if ep == 'learn' %}sideLinkActive{% endif %}" href="{{ url_for('learn') }}">Learn</a>
+          {% if profile and profile["selected_language"] == 'de-DE' %}
+            <a class="sideLink {% if ep == 'german_coach' %}sideLinkActive{% endif %}" href="{{ url_for('german_coach') }}">Coach</a>
+          {% else %}
+            <a class="sideLink {% if ep == 'learn' %}sideLinkActive{% endif %}" href="{{ url_for('learn') }}">Learn</a>
+          {% endif %}
           <a class="sideLink {% if ep == 'history' %}sideLinkActive{% endif %}" href="{{ url_for('history') }}">History</a>
           <a class="sideLink {% if ep in ['profile', 'language'] %}sideLinkActive{% endif %}" href="{{ url_for('profile') }}">Profile</a>
         </nav>
@@ -87,6 +91,9 @@
       <a class="bottomLink {% if ep in ['practice', 'feedback', 'upload_audio'] %}bottomLinkActive{% endif %}" href="{{ url_for('practice') }}">Test</a>
       <a class="bottomLink {% if ep in ['ai_conversation', 'ai_conversation_upload', 'ai_conversation_text'] %}bottomLinkActive{% endif %}" href="{{ url_for('ai_conversation') }}">AIConvo</a>
       <a class="bottomLink {% if ep == 'streaks' %}bottomLinkActive{% endif %}" href="{{ url_for('streaks') }}">Streaks</a>
+      {% if profile and profile["selected_language"] == 'de-DE' %}
+        <a class="bottomLink {% if ep == 'german_coach' %}bottomLinkActive{% endif %}" href="{{ url_for('german_coach') }}">Coach</a>
+      {% endif %}
       <a class="bottomLink {% if ep in ['profile', 'language'] %}bottomLinkActive{% endif %}" href="{{ url_for('profile') }}">Me</a>
     </nav>
   </body>

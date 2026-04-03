@@ -51,7 +51,7 @@
   </section>
 
   <script>
-    window.__DEMO_MODE__ = {{ "true" if demo else "false" }};
+    window.__DEMO_MODE__ = JSON.parse('{{ demo|tojson }}');
   </script>
   <script src="{{ url_for('static', filename='conversation.js') }}"></script>
 {% endblock %}

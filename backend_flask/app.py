@@ -43,6 +43,46 @@ LANGUAGES = [
     {"id": "es-ES", "label": "Spanish"},
 ]
 
+UI_STRINGS = {
+    "en-US": {
+        "practice": "Practice",
+        "target_sentence": "Target Sentence",
+        "visual_capture": "Visual Capture",
+        "instructions": "Instructions",
+        "start_recording": "Start Recording",
+        "stop": "Stop",
+        "analyzing": "Analyzing...",
+        "listen_native": "Listen to Native",
+        "ipa_guide": "Pronunciation Guide",
+    },
+    "en-GB": {
+        "practice": "Practice",
+        "target_sentence": "Target Sentence",
+        "visual_capture": "Visual Capture",
+        "instructions": "Instructions",
+        "start_recording": "Start Recording",
+        "stop": "Stop",
+        "analyzing": "Analyzing...",
+        "listen_native": "Listen to Native",
+        "ipa_guide": "Pronunciation Guide",
+    },
+    "de-DE": {
+        "practice": "Üben",
+        "target_sentence": "Zielsatz",
+        "visual_capture": "Visuelle Erfassung",
+        "instructions": "Anweisungen",
+        "start_recording": "Aufnahme starten",
+        "stop": "Stoppen",
+        "analyzing": "Analysieren...",
+        "listen_native": "Original anhören",
+        "ipa_guide": "Aussprache-Leitfaden",
+    }
+}
+
+
+def _get_ui_strings(language_id: str) -> dict:
+    return UI_STRINGS.get(language_id, UI_STRINGS["en-US"])
+
 
 def _get_youtube_embed_url(url: str) -> str:
     if not ("youtube.com" in url or "youtu.be" in url):
@@ -313,15 +353,19 @@ def transcribe_audio(audio_path: str, language_id: str) -> dict:
         return {"text": "", "demo": True, "words": []}
 
 
-def get_ai_feedback(expected: str, transcript: str, accuracy: float, fluency: float, pause_score: float, confidence_score: float) -> str:
+def get_ai_feedback(expected: str, transcript: str, accuracy: float, fluency: float, pause_score: float, confidence_score: float, language_id: str = "en-US") -> str:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "Great effort! Focus on matching the expected sentence more closely."
 
+    lang_name = "English"
+    if language_id == "de-DE": lang_name = "German"
+    elif language_id == "es-ES": lang_name = "Spanish"
+
     try:
         client = OpenAI(api_key=api_key)
         prompt = f"""
-        You are a professional pronunciation coach. 
+        You are a professional pronunciation coach for {lang_name}. 
         User tried to say: "{expected}"
         Actually said: "{transcript}"
         Accuracy: {accuracy}% (matching words)
@@ -329,16 +373,15 @@ def get_ai_feedback(expected: str, transcript: str, accuracy: float, fluency: fl
         Pause Score: {pause_score}% (100 is no awkward pauses)
         Confidence/Clarity: {confidence_score}%
 
-        Provide 2-3 specific sentences of feedback. 
+        Provide 2-3 specific sentences of feedback in {lang_name}. 
         - If the pause score is low, mention specific gaps. 
         - Mention any mispronounced phonemes or words. 
-        - Comment on their likely intonation or pitch based on the transcript match.
         - Be honest: if it was poor, say why so they can improve.
         - Do not give generic praise if the scores are low.
         """
         result = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "system", "content": "You are a friendly but firm pronunciation coach."},
+            messages=[{"role": "system", "content": f"You are a friendly but firm {lang_name} pronunciation coach."},
                       {"role": "user", "content": prompt}],
             temperature=0.7,
         )
@@ -708,12 +751,45 @@ def create_app() -> Flask:
                 db.executemany("INSERT INTO learning_videos (language, title, url, sample_phrase) VALUES (?, ?, ?, ?)", vids)
                 db.commit()
 
+            if db.execute("SELECT COUNT(*) FROM learning_videos WHERE language = 'en-GB'").fetchone()[0] <= 10:
+                # Add more videos from the British English Pronunciation playlist
+                more_vids = [
+                    ("en-GB", "Level 11 - Sentence Stress & Rhythm", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_&list=PLzMXToX8KzqgABZmT_LcYdED98Ixuc2Fx&index=11", "The rhythm of English depends on the stressed syllables."),
+                    ("en-GB", "Level 12 - Connected Speech: Linking", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_&list=PLzMXToX8KzqgABZmT_LcYdED98Ixuc2Fx&index=12", "I'm going to eat an orange for my lunch."),
+                    ("en-GB", "Level 13 - Intonation: Rising & Falling", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_&list=PLzMXToX8KzqgABZmT_LcYdED98Ixuc2Fx&index=13", "Are you coming to the party tonight?"),
+                    ("en-GB", "Level 14 - Pronouncing 'ED' endings", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_&list=PLzMXToX8KzqgABZmT_LcYdED98Ixuc2Fx&index=14", "He walked to the park and played with his friends."),
+                    ("en-GB", "Level 15 - Silent Letters in English", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_&list=PLzMXToX8KzqgABZmT_LcYdED98Ixuc2Fx&index=15", "The knight knew how to write a long psalm."),
+                ]
+                for v in more_vids:
+                    exists = db.execute("SELECT 1 FROM learning_videos WHERE title = ?", (v[1],)).fetchone()
+                    if not exists:
+                        db.execute("INSERT INTO learning_videos (language, title, url, sample_phrase) VALUES (?, ?, ?, ?)", v)
+                db.commit()
+
+            if db.execute("SELECT COUNT(*) FROM learning_videos WHERE language = 'de-DE' AND title LIKE 'Level %'").fetchone()[0] == 0:
+                # Remove default de-DE video if it exists
+                db.execute("DELETE FROM learning_videos WHERE language = 'de-DE' AND title = 'German CH sound explained'")
+                
+                vids = [
+                    ("de-DE", "Level 1 - German Basics", "https://youtu.be/MOtqMNKs0Jw?si=pgXYlVUqrC2l5N1k", "Guten Tag, wie geht es Ihnen heute?", "[ˈɡuːtn̩ taːk viː ɡeːt ɛs iːnən ˈhɔʏtə]"),
+                    ("de-DE", "Level 2 - Essential Phrases", "https://youtu.be/iB_sassbnOw?si=AIPZgVcU-8AMri0L", "Ich möchte gerne ein Glas Wasser bestellen.", "[ɪç ˈmœçtə ˈɡɛrnə aɪn ɡlaːs ˈvasɐ bəˈʃtɛlən]"),
+                    ("de-DE", "Level 3 - Pronunciation Tips", "https://youtu.be/5aNdCmSruYA?si=mshqlRgeyz9lllxt", "Die Aussprache ist der Schlüssel zum Erfolg.", "[diː ˈaʊsˌpʁaːxə ɪst deːɐ ˈʃlʏsl̩ t͡sʊm ɛɐ̯ˈfɔlk]"),
+                    ("de-DE", "Level 4 - Advanced Grammar", "https://youtu.be/-WHUtw33SQU?si=rFnCe7tOyoau8y2Z", "Könnten Sie mir bitte den Weg zum Bahnhof zeigen?", "[ˈkœntn̩ ziː miːɐ̯ ˈbɪtə deːn veːk t͡sʊm ˈbaːnˌhoːf ˈt͡saɪɡn̩]"),
+                    ("de-DE", "Level 5 - Common Mistakes", "https://youtu.be/u1gsES1gIr8?si=yByu2fzUpWZPsNBC", "Es ist wichtig, aus seinen Fehlern zu lernen.", "[ɛs ɪst ˈvɪçtɪç aʊs ˈzaɪnən ˈfeːlɐn t͡suː ˈlɛrnən]"),
+                    ("de-DE", "Level 6 - Conversational German", "https://youtu.be/y51_ftySlQo?si=kscR3TrnBc5rxgDk", "Wir haben uns lange nicht mehr gesehen.", "[viːɐ̯ ˈhaːbn̩ ʊns ˈlaŋə nɪçt meːɐ̯ ɡəˈzeːən]"),
+                    ("de-DE", "Level 7 - Fluent Speaking", "https://youtu.be/fWrCYzpXWfQ?si=YxNlwPzxa0Ltcnci", "Ich freue mich sehr auf unser nächstes Treffen.", "[ɪç ˈfʁɔʏə mɪç zeːɐ̯ aʊf ˈʊnzɐ ˈnɛːçstəs ˈtʁɛfn̩]"),
+                    ("de-DE", "Level 8 - Master the Accent", "https://youtu.be/T09k-gSi76k?si=BjHssX_dzmknKtJ7", "Übung macht den Meister beim Sprachenlernen.", "[ˈyːbʊŋ maxt deːn ˈmaɪstɐ baɪm ˈʃpʁaːxn̩ˌlɛrnən]"),
+                    ("de-DE", "Level 9 - Word: Eichhörnchen", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_", "Eichhörnchen", "[ˈaɪçˌhœrnçən]"),
+                    ("de-DE", "Level 10 - Word: Streichholzschächtelchen", "https://www.youtube.com/watch?v=0S_Z_Y_S_S_", "Streichholzschächtelchen", "[ˈʃtʁaɪçhɔlt͡sˌʃɛçtl̩çən]"),
+                ]
+                db.executemany("INSERT INTO learning_videos (language, title, url, sample_phrase, ipa_guide) VALUES (?, ?, ?, ?, ?)", vids)
+                db.commit()
+
             if db.execute("SELECT COUNT(*) FROM learning_videos").fetchone()[0] == 0:
                 vids = [
-                    ("en-GB", "British English pronunciation basics", "https://www.youtube.com/watch?v=9kQimR4D_s0", "Please fetch the water from the kitchen."),
+                    ("en-US", "English TH sound (guide)", "https://www.youtube.com/watch?v=J6JcK8qC6xk", "The quick brown fox jumps over the lazy dog."),
                     ("ja-JP", "Japanese pronunciation tips", "https://www.youtube.com/watch?v=7Yl1WnO_KtQ", "はじめまして。どうぞよろしくお願いします。"),
-                    ("de-DE", "German CH sound explained", "https://www.youtube.com/watch?v=Y1lJxgJ5p0c", "Vielen Dank. Ich freue mich auf die Zusammenarbeit."),
-                    ("es-ES", "Spanish rolled R practice", "https://www.youtube.com/watch?v=3wqO7dLrPQQ", "Muchas gracias. Espero trabajar contigo pronto."),
+                    ("es-ES", "Spanish rolled R practice", "https://www.youtube.com/watch?v=3wqO7dLrPQQ", "Muchas_gracias._Espero_trabajar_contigo_pronto."),
                 ]
                 db.executemany("INSERT INTO learning_videos (language, title, url, sample_phrase) VALUES (?, ?, ?, ?)", vids)
                 db.commit()
@@ -1182,6 +1258,8 @@ def create_app() -> Flask:
                 (language_id, updated_at, user_id),
             )
         g.db.commit()
+        if language_id == "de-DE":
+            return redirect(url_for("german_coach"))
         return redirect(url_for("dashboard"))
 
     @app.post("/set-language")
@@ -1205,6 +1283,8 @@ def create_app() -> Flask:
                 (language_id, updated_at, user_id),
             )
         g.db.commit()
+        if language_id == "de-DE":
+            return redirect(url_for("german_coach"))
         return redirect(url_for("learn"))
 
     @app.get("/practice")
@@ -1220,20 +1300,24 @@ def create_app() -> Flask:
         
         # Pick a random sample phrase from learning_videos for the selected language
         row = g.db.execute(
-            "SELECT sample_phrase FROM learning_videos WHERE language = ? AND sample_phrase IS NOT NULL ORDER BY RANDOM() LIMIT 1",
+            "SELECT sample_phrase, ipa_guide FROM learning_videos WHERE language = ? AND sample_phrase IS NOT NULL ORDER BY RANDOM() LIMIT 1",
             (language_id,),
         ).fetchone()
         
         # Fallback to sentences table if no video-based phrases found
         if not row:
             row = g.db.execute(
-                "SELECT text as sample_phrase FROM sentences WHERE language = ? ORDER BY RANDOM() LIMIT 1",
+                "SELECT text as sample_phrase, NULL as ipa_guide FROM sentences WHERE language = ? ORDER BY RANDOM() LIMIT 1",
                 (language_id,),
             ).fetchone()
             
-        sentence = {"text": row["sample_phrase"]} if row else {"text": "Welcome to ConverseAI. Let's practice!"}
+        sentence = {
+            "text": row["sample_phrase"] if row else "Welcome to ConverseAI. Let's practice!",
+            "ipa": row["ipa_guide"] if row else ""
+        }
         user = get_user(user_id)
-        return render_template("practice.html", user=user, profile=profile_row, language_id=language_id, sentence=sentence)
+        ui = _get_ui_strings(language_id)
+        return render_template("practice.html", user=user, profile=profile_row, language_id=language_id, sentence=sentence, ui=ui)
 
     @app.post("/upload_audio")
     @login_required
@@ -1312,7 +1396,7 @@ def create_app() -> Flask:
             scores = score_total(accuracy, fluency, expected_ph, actual_ph, whisper_words, confidence_proxy)
             total = scores["overall"]
 
-            ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"])
+            ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"], language_id)
 
             phoneme_fb = build_phoneme_feedback(language_id, expected_ph, actual_ph)
             feedback = {
@@ -1700,124 +1784,6 @@ def create_app() -> Flask:
             if os.path.exists(temp_audio):
                 os.remove(temp_audio)
 
-    @app.post("/video-test/analyze")
-    @login_required
-    def video_test_analyze():
-        try:
-            user_id = int(session["user_id"])
-        except Exception:
-            user_id = 0
-
-        def analyze_speech(expected: str, spoken: str):
-            exp = [w for w in expected.lower().split(" ") if w]
-            usr = [w for w in spoken.lower().split(" ") if w]
-
-            mistakes = []
-            correct = 0
-            for i, word in enumerate(exp):
-                if i >= len(usr) or not usr[i]:
-                    mistakes.append({"word": word, "type": "Skipped"})
-                elif usr[i] != word:
-                    mistakes.append({"word": word, "said": usr[i], "type": "Incorrect"})
-                else:
-                    correct += 1
-
-            score = int(round((correct / max(1, len(exp))) * 10))
-            score = max(0, min(10, score))
-            return {"score": score, "mistakes": mistakes, "correct": correct, "total": len(exp)}
-
-        audio = request.files.get("audio")
-        expected = (request.form.get("expected") or "").strip()
-        if not audio or not audio.filename:
-            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
-
-        audio_filename = f"{uuid.uuid4().hex}.webm"
-        audio_path = os.path.join(UPLOAD_DIR, audio_filename)
-        try:
-            audio.save(audio_path)
-        except Exception:
-            logger.exception("video_test save failed")
-            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
-
-        try:
-            if demo_mode():
-                return {
-                    "score": 9,
-                    "confidence": 82,
-                    "feedback": [
-                        "Good clarity",
-                        "Improve 'th' pronunciation",
-                        "Slight pause needed between words",
-                    ],
-                }
-
-            profile_row = get_profile(user_id) if user_id else None
-            language_id = (profile_row["selected_language"] or "en-US") if profile_row else "en-US"
-
-            result = transcribe_audio(audio_path, language_id)
-            transcript = result["text"]
-            demo = result["demo"]
-            if demo or not transcript:
-                return {
-                    "score": 9,
-                    "confidence": 80,
-                    "feedback": [
-                        "Good clarity",
-                        "Improve 'th' pronunciation",
-                        "Slight pause needed between words",
-                    ],
-                }
-
-            if expected:
-                analysis = analyze_speech(expected, transcript)
-                score = int(analysis["score"])
-                total = int(analysis["total"]) or 1
-                correct = int(analysis["correct"])
-                confidence = int(max(25, min(99, round((correct / total) * 100))))
-                mistakes = list(analysis["mistakes"])[:3]
-                feedback = []
-                if not mistakes:
-                    feedback = ["Good clarity", "Nice pacing", "Keep your stress on key words consistent"]
-                else:
-                    for m in mistakes:
-                        if m.get("type") == "Skipped":
-                            feedback.append(f"Skipped: '{m.get('word', '')}'")
-                        else:
-                            feedback.append(
-                                f"Expected '{m.get('word', '')}', you said '{m.get('said', '')}'"
-                            )
-                    if len(feedback) < 3:
-                        feedback.append("Repeat slowly once, then at normal speed")
-                return {
-                    "score": score,
-                    "confidence": confidence,
-                    "feedback": feedback,
-                    "mistakes": mistakes,
-                    "transcript": transcript,
-                }
-
-            base = 6 + secrets.randbelow(4)
-            if len(transcript) > 30:
-                base = min(10, base + 1)
-            confidence = min(95, 55 + base * 4 + secrets.randbelow(10))
-
-            options = [
-                "Great clarity and pacing.",
-                "Good pronunciation, improve 'th' sound.",
-                "Excellent fluency, slight stress issues.",
-                "Nice effort. Slow down a little and keep consonants crisp.",
-                "Strong delivery. Focus on smoother transitions between sounds.",
-            ]
-            feedback = [
-                options[secrets.randbelow(len(options))],
-                "Try repeating the key phrase twice at a slower pace.",
-                "Keep the end sounds clear (don’t drop final consonants).",
-            ]
-            return {"score": int(base), "confidence": int(confidence), "feedback": feedback}
-        except Exception:
-            logger.exception("video_test analyze failed")
-            return {"score": 0, "confidence": 0, "feedback": [], "error": "Analysis unavailable, try again"}
-
     @app.get("/feedback/<int:session_id>")
     @login_required
     def feedback(session_id: int):
@@ -1899,7 +1865,7 @@ def create_app() -> Flask:
         
         scores = score_total(accuracy, fluency, expected_ph, actual_ph, whisper_words, confidence_proxy)
         
-        ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"])
+        ai_text = get_ai_feedback(expected_text, transcript, accuracy, fluency, scores["rhythm"], scores["phoneme"], language_id)
 
         return {
             "score": round(scores["overall"] / 10, 1),
@@ -1908,6 +1874,17 @@ def create_app() -> Flask:
             "transcript": transcript,
             "scores": scores
         }
+
+    @app.get("/german-coach")
+    @login_required
+    def german_coach():
+        user_id = int(session["user_id"])
+        onboarding = ensure_onboarding(user_id)
+        if onboarding:
+            return onboarding
+        user = get_user(user_id)
+        profile_row = get_profile(user_id)
+        return render_template("german_coach.html", user=user, profile=profile_row)
 
     @app.get("/history")
     @login_required
